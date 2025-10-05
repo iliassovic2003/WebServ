@@ -1,0 +1,120 @@
+server {
+    address 127.0.0.1;
+
+    listen 1337;
+    listen 8080;
+    listen 8081;
+    server_name server1;
+
+    root /www;
+
+    request_timeout 10S;
+    CGI_script_timeout 20S;
+    client_max_body_size 100M;
+
+    error_page 404 /404.html;
+    error_page 403 /403.html;
+    error_page 500 /500.html;
+    error_page 502 /502.html;
+    error_page 503 /503.html;
+    error_page 504 /504.html;
+
+    location / {
+        return 307 /home;
+        allowed_methods GET;
+    }
+
+    location /home {
+        root /www/IndexPages;
+        index home.html;
+        allowed_methods GET;
+    }
+
+    location /upload {
+        root /www/IndexPages;
+        index upload_form.html;
+        allowed_methods GET POST;
+        upload_enable on;
+        upload_store /www/Upload;
+        success_redirect /upload-success;
+        failed_redirect /upload-failed;
+    }
+
+    location /upload-success {
+        root /www/IndexPages;
+        index success.html;
+        allowed_methods GET;
+    }
+
+    location /upload-failed {
+        root /www/IndexPages;
+        index failed.html;
+        allowed_methods GET;
+    }
+
+    location /files {
+        root /www/Upload;
+        allowed_methods GET DELETE;
+        auto_index on;
+    }
+
+    location /cgi-bin {
+        root /www/CGI-bin;
+        allowed_methods GET POST;
+        cgi_enable on;
+        cgi_pass .php /usr/bin/php-cgi;
+        cgi_pass .py /usr/bin/python3;
+        cgi_pass .pl /usr/bin/perl;
+        cgi_pass .sh /usr/bin/bash;
+        auto_index on;
+    }
+
+    location /errors {
+        root /www/ErrorPages;
+        allowed_methods GET;
+        auto_index on;
+    }
+
+    location /errors/aiooo {
+        root /www/ErrorPages/aiooo;
+        allowed_methods GET;
+        auto_index on;
+    }
+}
+
+server {
+    address 127.0.0.2;
+
+    listen 9000;
+    server_name server2;
+
+    root /www;
+
+    request_timeout 10S;
+    CGI_script_timeout 20S;
+    client_max_body_size 10M;
+
+    error_page 404 /404.html;
+    error_page 500 /500.html;
+
+    location /home {
+        root /www/IndexPages;
+        index home.html;
+        allowed_methods GET;
+    }
+
+    location /upload {
+        root /www/IndexPages;
+        index upload_form.html;
+        allowed_methods GET POST;
+        upload_enable on;
+        upload_store /www/Upload;
+        success_redirect /upload-success;
+        failed_redirect /upload-failed;
+    }
+
+    location /errors {
+        root /www/ErrorPages;
+        allowed_methods GET;
+    }
+}

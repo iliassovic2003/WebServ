@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebServ</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+
+        .bubbles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
+        .bubble {
+            position: absolute;
+            bottom: -100px;
+            background: radial-gradient(circle, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.2));
+            border-radius: 50%;
+            opacity: 0.6;
+            animation: rise 15s infinite ease-in;
+        }
+
+        .bubble:nth-child(1) { width: 90px; height: 90px; left: 10%; animation-duration: 12s; animation-delay: 0s; }
+        .bubble:nth-child(2) { width: 60px; height: 60px; left: 20%; animation-duration: 14s; animation-delay: 2s; }
+        .bubble:nth-child(3) { width: 100px; height: 100px; left: 35%; animation-duration: 16s; animation-delay: 4s; }
+        .bubble:nth-child(4) { width: 70px; height: 70px; left: 50%; animation-duration: 13s; animation-delay: 1s; }
+        .bubble:nth-child(5) { width: 90px; height: 90px; left: 65%; animation-duration: 15s; animation-delay: 3s; }
+        .bubble:nth-child(6) { width: 120px; height: 120px; left: 75%; animation-duration: 17s; animation-delay: 5s; }
+        .bubble:nth-child(7) { width: 75px; height: 75px; left: 85%; animation-duration: 14s; animation-delay: 2.5s; }
+        .bubble:nth-child(8) { width: 55px; height: 55px; left: 40%; animation-duration: 15s; animation-delay: 1.5s; }
+        .bubble:nth-child(9) { width: 110px; height: 110px; left: 0%; animation-duration: 19s; animation-delay: 4s; }
+
+        @keyframes rise {
+            0% {
+                bottom: -100px;
+                transform: translateX(0);
+                opacity: 0.6;
+            }
+            50% {
+                transform: translateX(100px);
+                opacity: 0.8;
+            }
+            100% {
+                bottom: 110%;
+                transform: translateX(-50px);
+                opacity: 0;
+            }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 3rem 2rem;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            font-size: 3rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            color: #a0a0a0;
+            margin-top: 0.5rem;
+        }
+
+        .status {
+            display: inline-block;
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+            padding: 0.5rem 1.5rem;
+            border-radius: 20px;
+            margin-top: 1rem;
+            border: 1px solid #4caf50;
+        }
+
+        .menu {
+            display: flex;
+            flex-direction: column;
+            text-align: center;
+            gap: 1rem;
+        }
+
+        .menu-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid white;
+            border-radius: 18px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            min-width: 500px;
+            text-decoration: none;
+            color: inherit;
+            display: inline-block;
+        }
+
+        .menu-item:hover {
+            transform: translateX(10px);
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
+        }
+
+        .menu-item h3 {
+        background: linear-gradient(135deg, #D11B00 0%, #00B5D1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 0.5rem;
+        font-size: 1.3rem;
+        display: inline-block;
+    }
+
+        .menu-item p {
+            color: #b0b0b0;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+
+        .info-section {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-top: 8rem;
+        }
+
+        .info-section h2 {
+            color: #667eea;
+            margin-bottom: 1rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .info-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .info-label {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 0.3rem;
+        }
+
+        .info-value {
+            color: #e0e0e0;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 10rem;
+            padding: 1.5rem;
+            padding-bottom: 0;
+            color: #666;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="bubbles">
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1>WebServ's Abyss</h1>
+            <p class="subtitle">HTTP Server Dashboard</p>
+            <div class="status">Online</div>
+        </header>
+
+        <div class="menu">
+
+            <a href="/errors" class="menu-item">
+                <h3>Error Pages</h3>
+                <p>Test custom error page handling (404, 403, 500, etc.)</p>
+            </a>
+
+            <a href="/cgi-bin/test.py" class="menu-item">
+                <h3>CGI Scripts</h3>
+                <p>Test Common Gateway Interface script execution</p>
+            </a>
+
+            <a href="/" class="menu-item">
+                <h3>Redirection</h3>
+                <p>Test HTTP redirect</p>
+            </a>
+
+            <a href="/upload" class="menu-item">
+                <h3>Upload Test</h3>
+                <p>Test file upload functionality and multipart form data</p>
+            </a>
+
+            <a href="/files" class="menu-item">
+                <h3>Uploaded Files</h3>
+                <p>File Explorar For Noobs</p>
+            </a>
+        </div>
+
+        <div class="info-section">
+            <h2>Server Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="info-label">Protocol</div>
+                    <div class="info-value">HTTP/1.0</div>
+                </div>
+
+                <div class="info-item">
+                    <div class="info-label">Server Name</div>
+                    <div class="info-value">{{SERVER_NAME}}</div>
+                </div>
+                
+                <div class="info-item">
+                    <div class="info-label">Port</div>
+                    <div class="info-value">{{PORT}}</div>
+                </div>
+                
+                <div class="info-item">
+                    <div class="info-label">IP Address</div>
+                    <div class="info-value">{{SERVER_IP}}</div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Built with Hardwork, Love, and Subject compliance</p>
+            <p style="margin-top: 0.5rem; font-size: 0.9rem;">this team is barely alive, only consumed caffeine for last months, tread carefully.</p>
+        </footer>
+    </div>
+</body>
+</html>
