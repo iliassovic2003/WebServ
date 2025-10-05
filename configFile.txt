@@ -8,7 +8,7 @@ server {
 
     root /www;
 
-    request_timeout 10S;
+    request_timeout 20S;
     CGI_script_timeout 20S;
     client_max_body_size 100M;
 

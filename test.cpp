@@ -20,15 +20,16 @@
 #include <algorithm>
 #include <iomanip>
 #include <dirent.h>
+#include <ctime>
+#include <signal.h>
 
 static int chIndex = 0;
 static int clIndex = 0;
+static bool _ssig = 1;
 
 enum ClientState
 {
     READING_HEADERS,
-    READING_BODY,
-    PROCESSING_REQUEST,
     SENDING_RESPONSE,
     FINISHED
 };
@@ -123,14 +124,13 @@ class clientData
         uint64_t    totalSize;
         bool        headers_complete;
         bool        body_complete;
-        bool        keep_alive;
         int         totalbytes;
         
 
         clientData() : content_length(0), flag(0), posOffset(0), is_chunked(0), 
                       totalSize(0), fd(-1), fileFd(-1), state(READING_HEADERS),
                       bytes_sent(0), headers_complete(false), body_complete(false),
-                      keep_alive(false), ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0) {}
+                      ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0) {}
         ~clientData() {};
 };
 
@@ -708,8 +708,6 @@ uint64_t parseMemorySize(const std::string& sizeStr)
                 multiplier = 1024ULL * 1024 * 1024; break;
             case 't':
                 multiplier = 1024ULL * 1024 * 1024 * 1024; break;
-            case 'p':
-                multiplier = 1024ULL * 1024 * 1024 * 1024 * 1024; break;
             case 'b': case '\0':
                     break;
             default:
@@ -1053,6 +1051,47 @@ void printServerConfig(Server& server, int index)
     //     }
     //     std::cout << std::endl;
     // }
+}
+
+void printInstructions()
+{
+    std::cout << "\n";
+    std::cout << "==========================================================\n";
+    std::cout << "                    WebServ HTTP Server                   \n";
+    std::cout << "==========================================================\n\n";
+    
+    std::cout << "USAGE:\n";
+    std::cout << "  ./webserv [configuration_file]\n\n";
+    
+    std::cout << "DESCRIPTION:\n";
+    std::cout << "  A lightweight HTTP/1.0 web server implementation.\n";
+    std::cout << "  If no configuration file is provided, all the blame on you\n\n";
+    
+    std::cout << "CONFIGURATION FILE:\n";
+    std::cout << "  The configuration file defines server behavior including:\n";
+    std::cout << "    - Server Ip ports\n";
+    std::cout << "    - Document root directories\n";
+    std::cout << "    - Allowed HTTP methods (GET, POST, DELETE)\n";
+    std::cout << "    - Error page locations\n";
+    std::cout << "    - CGI script handling\n";
+    std::cout << "    - File upload settings\n";
+    std::cout << "    - Directory auto-indexing\n";
+    std::cout << "    - URL redirections\n\n";
+    
+    std::cout << "IMPORTANT NOTICE:\n";
+    std::cout << "  These are important instructions that rules the webserv.\n";
+    std::cout << "  Neglecting any of this will end in crash:\n";
+    std::cout << "    - swp directory must be always present.\n\n";
+    std::cout << "    - config file is highly sensitive to any characters\n";
+    std::cout << "    * * No additional white spaces.\n";
+    std::cout << "    * * Comments are not handled.\n\n";
+    std::cout << "    - Uploading a file with the same name as an old file.\n";
+    std::cout << "    * * Results in the loss of the old data.\n\n";
+    
+    std::cout << "EXIT:\n";
+    std::cout << "  Press Ctrl+C to stop the server.\n\n";
+    
+    std::cout << "==========================================================\n\n";
 }
 
 void cleanupClient(int epoll_fd, clientData *cData, std::map<int, clientData*>& clientDataMap)
@@ -1571,7 +1610,6 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
                 
                 if (isDirectRequest)
                 {
-                    // Show the media viewer page
                     std::string html = readMediaViewerTemplate();
                     
                     size_t lastSlash = fullPath.find_last_of('/');
@@ -1799,14 +1837,13 @@ ServerSocket* findServerSocket(std::vector<ServerSocket>& serverSockets, int fd)
 unsigned long convertIPtoLong(const std::string& ip_str)
 {
     if (ip_str.empty())
-        return htonl(INADDR_ANY);  // Default to 0.0.0.0
+        return htonl(INADDR_ANY);
     
-    // Handle special cases
     if (ip_str == "localhost" || ip_str == "127.0.0.1")
-        return htonl(INADDR_LOOPBACK);  // 127.0.0.1
+        return htonl(INADDR_LOOPBACK);
 
     if (ip_str == "any" || ip_str == "0.0.0.0")
-        return htonl(INADDR_ANY);       // 0.0.0.0
+        return htonl(INADDR_ANY);
     
     unsigned char ip_parts[4] = {0, 0, 0, 0};
     int part_index = 0;
@@ -1821,8 +1858,6 @@ unsigned long convertIPtoLong(const std::string& ip_str)
         {
             current_number = current_number * 10 + (c - '0');
             has_digit = true;
-            
-            // Check for overflow
             if (current_number > 255)
             {
                 std::cerr << "Invalid IP address: " << ip_str << " (number > 255)" << std::endl;
@@ -1855,25 +1890,46 @@ unsigned long convertIPtoLong(const std::string& ip_str)
         }
     }
     
-    // Check if we have exactly 4 parts
     if (part_index != 4)
     {
         std::cerr << "Invalid IP address: " << ip_str << " (wrong number of parts)" << std::endl;
         return htonl(INADDR_ANY);
     }
     
-    // Convert to 32-bit integer and return in network byte order
     unsigned long ip_long = (ip_parts[0] << 24) | (ip_parts[1] << 16) | (ip_parts[2] << 8) | ip_parts[3];
     return htonl(ip_long);
 }
 
+void signal_handler(int sig)
+{
+    if (sig == SIGINT || sig == SIGTERM) // sigterm can be deleated
+    {
+        std::cout << "\nCleaning and exiting..." << std::endl;
+        _ssig = 0;
+    }
+}
+
+void setup_signals()
+{
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);    
+    signal(SIGPIPE, SIG_IGN);
+}
+
 int main(int ac, char **av)
 {
+    static bool _status = 1;
     if (ac != 2)
     {
         printf("Usage: ./webserv <configuration file> \n");
         return (1);
     }
+    setup_signals();
 
     std::fstream    inFile;
     std::string     line;
@@ -1903,6 +1959,7 @@ int main(int ac, char **av)
             printServerConfig(servers[i], i + 1);
     }
 
+    printInstructions();
     int         exitStatus = 0;
     int         cliefd = -1;
     sockaddr_in clie_add;
@@ -1988,12 +2045,15 @@ int main(int ac, char **av)
         if (readyEvents == -1)
         {
             if (errno == EINTR)
-                continue;
+                break;
             close(epoll_fd);
             perror("epoll_wait");
             exitStatus = 1;
             break;
         }
+
+        if (!_status)
+            break;
 
         for (int i = 0; i < readyEvents; i++)
         {
@@ -2155,7 +2215,6 @@ int main(int ac, char **av)
                             httpClientRequest* req = new httpClientRequest();
                             req->parseRequest(cData->request_data);
                             
-                            // Generate response
                             if (req->_method == "GET")
                                 cData->response_data = getHandle(req, servers[cData->serverIndex], cData);
                             else if (req->_method == "POST")
@@ -2201,29 +2260,8 @@ int main(int ac, char **av)
                         
                         if (cData->bytes_sent >= cData->response_data.length())
                         {
-                            if (cData->keep_alive)
-                            {
-                                cData->request_data.clear();
-                                cData->response_data.clear();
-                                cData->bytes_sent = 0;
-                                cData->content_length = 0;
-                                cData->state = READING_HEADERS;
-                                cData->headers_complete = false;
-                                cData->body_complete = false;
-                                cData->keep_alive = false;
-                                
-                                struct epoll_event modify_event;
-                                modify_event.events = EPOLLIN;
-                                modify_event.data.fd = cliefd;
-                                
-                                if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cliefd, &modify_event) == -1) {
-                                    perror("epoll_ctl MOD back to EPOLLIN");
-                                    cleanupClient(epoll_fd, cData, clientDataMap);
-                                } else
-                                    printf("Keep-alive: Client %d ready for next request\n", cliefd);
-                            }
-                            else
-                                cleanupClient(epoll_fd, cData, clientDataMap);
+                            cleanupClient(epoll_fd, cData, clientDataMap);
+                            cData->state = FINISHED;
                         }
                     }
                 }
@@ -2237,9 +2275,13 @@ int main(int ac, char **av)
         }
     }
     
-    for (std::map<int, clientData*>::iterator it = clientDataMap.begin(); 
-                it != clientDataMap.end(); ++it)
-        cleanupClient(epoll_fd, it->second, clientDataMap);
+    std::map<int, clientData*>::iterator it = clientDataMap.begin();
+    while (it != clientDataMap.end())
+    {
+        std::map<int, clientData*>::iterator current = it;
+        ++it;
+        cleanupClient(epoll_fd, current->second, clientDataMap);
+    }
     
     for (auto& ss : serverSockets)
         close(ss.sockfd);
