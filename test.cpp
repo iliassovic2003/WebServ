@@ -22,16 +22,23 @@
 #include <dirent.h>
 #include <ctime>
 #include <signal.h>
+#include <sys/wait.h>
 
 static int chIndex = 0;
 static int clIndex = 0;
-static bool _ssig = 1;
 
 enum ClientState
 {
     READING_HEADERS,
     SENDING_RESPONSE,
+    WAITING_CGI_OUTPUT,
     FINISHED
+};
+
+struct stringNum
+{
+    std::string str;
+    uint64_t    num;
 };
 
 class errorPage
@@ -48,17 +55,19 @@ class Location
     public:
         std::string url;
         std::map<std::string, std::string> directives;
-        bool        is_redirect;
         bool        auto_index;
+        bool        is_redirect;
         bool        is_upload;
+        bool        is_cgi;
         std::string redirect_url;
         int         redirect_code;
         
         Location(std::string u) : 
             url(u), 
-            is_redirect(false), 
             auto_index(false), 
+            is_redirect(false), 
             is_upload(false),
+            is_cgi(false),
             redirect_code(0) {}
         
         std::string getValue(const std::string& key) const 
@@ -67,10 +76,6 @@ class Location
             if (it != directives.end())
                 return (it->second);
             return ("");
-        }
-        
-        bool hasDirective(const std::string& key) const{
-            return directives.find(key) != directives.end();
         }
 };
 
@@ -83,21 +88,30 @@ class Server
         std::string             _serverName;
         std::string             _serverIp;
         std::string             _serverRoot;
-        std::string             _reqTimeout;
-        std::string             _cgiTimeout;
-        std::string             _maxBodySize;
+        stringNum               _reqTimeout;
+        stringNum               _cgiTimeout;
+        stringNum               _maxBodySize;
         std::vector<errorPage>  _errorPages;
         std::vector<Location>   _locations;
 
 
         Server() : _errorIndex(0), _locIndex(0),
-                 _serverPort(0), _serverIp("127.0.0.0"),
-                 _maxBodySize("0") {};
+                 _serverPort(0), _serverIp("127.0.0.0")
+                 {
+                    _reqTimeout.num = 0;
+                    _cgiTimeout.num = 0;
+                    _maxBodySize.num = 0;
+                    _reqTimeout.str = "0";
+                    _cgiTimeout.str = "0";
+                    _maxBodySize.str = "0";
+                 };
         ~Server() {};
 
         void            parseConfigFile(std::string line);
         void            parseLocation(std::string map, std::string url);
         void            getConfigLine(std::string& config);
+        uint64_t        parseMemorySize(const std::string& sizeStr);
+        uint64_t        parseTimeout(std::string& sizeStr, int defaultValue);
         std::string     checkValue(std::string location, std::string key);
         std::string     findFile(int code);
 };
@@ -106,9 +120,14 @@ class clientData
 {
     public:
         int         fd;
+        int         cgiPid;
+        int         cgiFd;
+        int         fileFd;
         int         serverIndex;
         int         serverPort;
-        int         fileFd;
+        std::string serverIp;
+        std::string clientIp;
+        int         clientPort;
         ClientState state;
         std::string request_data;
         std::string response_data;
@@ -125,12 +144,14 @@ class clientData
         bool        headers_complete;
         bool        body_complete;
         int         totalbytes;
-        
+        long        requestStartTime;
+        std::string CgiBody;
 
         clientData() : content_length(0), flag(0), posOffset(0), is_chunked(0), 
                       totalSize(0), fd(-1), fileFd(-1), state(READING_HEADERS),
                       bytes_sent(0), headers_complete(false), body_complete(false),
-                      ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0) {}
+                      ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0),
+                      requestStartTime(0), cgiFd(-1), CgiBody("") {}
         ~clientData() {};
 };
 
@@ -234,6 +255,145 @@ void     Server::getConfigLine( std::string& config )
     }
 }
 
+uint64_t    Server::parseMemorySize(const std::string& sizeStr)
+{
+    if (sizeStr.empty())
+    {
+        std::cout << "No Defined Max_Body_Size, Default: 1M." << std::endl; 
+        this->_maxBodySize.str = "1M";
+        return (1048576);
+    }
+
+    uint64_t value = 0;
+    size_t i = 0;
+    
+    while (i < sizeStr.size() && std::isdigit(sizeStr[i]))
+    {
+        if (value > (UINT64_MAX - (sizeStr[i] - '0')) / 10)
+        {
+            std::cerr << "Size value too large, Default: 1M." << std::endl;
+            this->_maxBodySize.str = "1M";
+            return (1048576);
+        }
+        value = value * 10 + (sizeStr[i] - '0');
+        i++;
+    }
+    
+    while (i < sizeStr.size() && std::isspace(sizeStr[i]))
+        i++;
+    
+    if (i < sizeStr.size())
+    {
+        char unit = std::tolower(sizeStr[i]);
+        uint64_t multiplier = 1;
+        
+        switch (unit)
+        {
+            case '-':
+            {
+                std::cerr << "\033[1;31mNegative Value, Default: 1M.\033[0m" << std::endl;
+                this->_maxBodySize.str = "1M";
+                return (1048576);
+            }
+            case 'k':
+                multiplier = 1024; break;
+            case 'm':
+                multiplier = 1024 * 1024; break;
+            case 'g':
+                multiplier = 1024ULL * 1024 * 1024; break;
+            case 't':
+                multiplier = 1024ULL * 1024 * 1024 * 1024; break;
+            case 'b': case '\0':
+                    break;
+            default:
+            {
+                std::cerr << "\033[1;31mNot Allowed or Unkown Unit, Default: 1M.\033[0m" << std::endl;
+                this->_maxBodySize.str = "1M";
+                return (1048576);
+            }
+        }
+        
+        if (value > UINT64_MAX / multiplier)
+        {
+            std::cerr << "\033[1;34mSize value too large after unit conversion\033[0m" << std::endl;
+            this->_maxBodySize.str = "1M";
+            return (1048576);
+        }
+        value *= multiplier;
+    }
+
+    return (value);
+}
+
+uint64_t Server::parseTimeout(std::string& sizeStr, int defaultValue)
+{
+    if (sizeStr.empty())
+    {
+        sizeStr = std::to_string(defaultValue) + "S";
+        return (defaultValue);
+    }
+    
+    std::string numStr;
+    char unit = '\0';
+    bool isNegative = false;
+    
+    if (sizeStr[0] == '-')
+    {
+        isNegative = true;
+        std::cerr << "\033[1;31mNegative Value, Default: " << defaultValue << "S.\033[0m" << std::endl;
+        sizeStr = std::to_string(defaultValue) + "S";
+        return (defaultValue);
+    }
+    
+    for (size_t i = 0; i < sizeStr.length(); i++)
+    {
+        if (std::isdigit(sizeStr[i]))
+            numStr += sizeStr[i];
+        else if (sizeStr[i] == 'S' || 
+                 sizeStr[i] == 'M')
+        {
+            unit = sizeStr[i];
+            break;
+        }
+        else if (sizeStr[i] == '-')
+        {
+            isNegative = true;
+            std::cerr << "\033[1;31mNegative Value, Default: " << defaultValue << "S.\033[0m" << std::endl;
+            sizeStr = std::to_string(defaultValue) + "S";
+            return (defaultValue);
+        }
+    }
+    
+    if (numStr.empty())
+    {
+        sizeStr = std::to_string(defaultValue) + "S";
+        return (defaultValue);
+    }
+    
+    uint64_t value = std::strtoull(numStr.c_str(), NULL, 10);
+    
+    if (isNegative)
+    {
+        std::cerr << "\033[1;31mNegative Value, Default: " << defaultValue << "S.\033[0m" << std::endl;
+        sizeStr = std::to_string(defaultValue) + "S";
+        return (defaultValue);
+    }
+    
+    if (unit == 'M')
+        return (value * 60);
+    else if (unit == 'S')
+        return (value);
+    else if (unit != '\0')
+    {
+        std::cerr << "\033[1;31mNo Unit Detected, Default: " << defaultValue << "S.\033[0m" << std::endl;
+        sizeStr = std::to_string(defaultValue) + "S";
+        return (defaultValue);
+    }
+    
+    sizeStr = std::to_string(defaultValue) + "S";
+    return (defaultValue);
+}
+
 void            Server::parseConfigFile( std::string line )
 {
     size_t start = line.find_first_not_of(" \t");
@@ -266,11 +426,20 @@ void            Server::parseConfigFile( std::string line )
     else if (!line.find("root"))
         this->_serverRoot = line.substr(5);
     else if (!line.find("request_timeout"))
-        this->_reqTimeout = line.substr(16);
+    {
+        this->_reqTimeout.str = line.substr(16);
+        this->_reqTimeout.num = parseTimeout(this->_reqTimeout.str, 30);
+    }
     else if (!line.find("CGI_script_timeout"))
-        this->_cgiTimeout = line.substr(19);
+    {
+        this->_cgiTimeout.str = line.substr(19);
+        this->_cgiTimeout.num = parseTimeout(this->_cgiTimeout.str, 60);
+    }
     else if (!line.find("client_max_body_size"))
-        this->_maxBodySize = line.substr(21);
+    {
+        this->_maxBodySize.str = line.substr(21);
+        this->_maxBodySize.num = parseMemorySize(this->_maxBodySize.str);
+    }
     else if (!line.find("address"))
         this->_serverIp = line.substr(8);
     else if (!line.find("error_page"))
@@ -333,6 +502,8 @@ void Server::parseLocation(std::string map, std::string locationURL)
             loc.auto_index = (value == "on");
         else if (key == "upload_enable")
             loc.is_upload = (value == "on");
+        else if (key == "cgi_enable")
+            loc.is_cgi = (value == "on");
         
         map.erase(0, semiPos + 1);
         size_t mapStart = map.find_first_not_of(" \t\n");
@@ -668,69 +839,9 @@ size_t hexToDecimal(const std::string& hexStr)
     return result;
 }
 
-uint64_t parseMemorySize(const std::string& sizeStr)
+int handleChunkedRequest(clientData* cData, Server& server)
 {
-    if (sizeStr.empty())
-    {
-        std::cout << "No Defined Max_Body_Size, Default: 1M." << std::endl; 
-        return (1048576);
-    }
-
-    uint64_t value = 0;
-    size_t i = 0;
-    
-    while (i < sizeStr.size() && std::isdigit(sizeStr[i]))
-    {
-        if (value > (UINT64_MAX - (sizeStr[i] - '0')) / 10)
-        {
-            std::cerr << "Size value too large, Default: 1M." << std::endl;
-            return (1048576);
-        }
-        value = value * 10 + (sizeStr[i] - '0');
-        i++;
-    }
-    
-    while (i < sizeStr.size() && std::isspace(sizeStr[i]))
-        i++;
-    
-    if (i < sizeStr.size())
-    {
-        char unit = std::tolower(sizeStr[i]);
-        uint64_t multiplier = 1;
-        
-        switch (unit)
-        {
-            case 'k':
-                multiplier = 1024; break;
-            case 'm':
-                multiplier = 1024 * 1024; break;
-            case 'g':
-                multiplier = 1024ULL * 1024 * 1024; break;
-            case 't':
-                multiplier = 1024ULL * 1024 * 1024 * 1024; break;
-            case 'b': case '\0':
-                    break;
-            default:
-            {
-                std::cerr << "Unkown Unit, Default: 1M." << std::endl;
-                return (1048576);
-            }
-        }
-        
-        if (value > UINT64_MAX / multiplier)
-        {
-            std::cerr << "Size value too large after unit conversion" << std::endl;
-            return (1048576);
-        }
-        value *= multiplier;
-    }
-
-    return (value);
-}
-
-int handleChunkedRequest(clientData* cData, Server server)
-{
-    uint64_t maxSize = parseMemorySize(server._maxBodySize);
+    uint64_t maxSize = server._maxBodySize.num;
 
     int cfd = open(cData->filename.c_str(), O_RDWR | O_APPEND | O_CREAT, 0644);
     if (cfd < 0)
@@ -790,9 +901,9 @@ int handleChunkedRequest(clientData* cData, Server server)
     return (close(cfd), 0);
 }
 
-int handleContentLengthRequest(clientData* cData, Server server)
+int handleContentLengthRequest(clientData* cData, Server& server)
 {
-    uint64_t maxSize = parseMemorySize(server._maxBodySize);
+    uint64_t maxSize = server._maxBodySize.num;
     if (cData->content_length > maxSize)
     {
         sendErrorCode(413, server, cData);
@@ -842,18 +953,38 @@ int handleContentLengthRequest(clientData* cData, Server server)
     return (0);
 }
 
-bool isCgiRequest(httpClientRequest* req)
+Location* findLocation(Server& server, const std::string& path)
 {
+    for (size_t i = 0; i < server._locations.size(); i++)
+        if (path == server._locations[i].url)
+            return &server._locations[i];
+    return (NULL);
+}
+
+bool isValidCgiRequest(httpClientRequest* req, Server server)
+{
+    
     std::string path = req->_path;
-    // return (path.find(".php") != std::string::npos ||
-    //         path.find(".py") != std::string::npos ||
-    //         path.find(".pl") != std::string::npos ||
-    //         path.find(".rb") != std::string::npos ||
-    //         path.find(".sh") != std::string::npos ||
-    //         path.find(".cgi") != std::string::npos ||
-    //         path.find(".exe") != std::string::npos ||
-    //         path.find(".out") != std::string::npos);
-    return (path.find("/cgi-bin/"));
+
+    int pos = path.find_last_of(".");
+    if (pos == std::string::npos)
+        return (false);
+
+    std::string extension = path.substr(pos, path.length());
+    
+    pos = path.find_last_of("/");
+    if (pos == std::string::npos)
+        return (false);
+    
+    std::string tmp = path.substr(0, pos);
+
+    Location* loc = findLocation(server, tmp);
+    if (loc)
+    {
+        if (!loc->getValue(extension).empty() && loc->is_cgi)
+            return (true);
+    }
+    return (false);
 }
 
 std::string extractFileContent(const std::string& body)
@@ -1030,27 +1161,11 @@ void printServerConfig(Server& server, int index)
     std::cout << "║  🌐 IP Addr:     " << std::setw(33) << server._serverIp << "║" << std::endl;  
     std::cout << "║  🔖 Name:        " << std::setw(33) << server._serverName << "║" << std::endl;
     std::cout << "║  📁 Root:        " << std::setw(33) << server._serverRoot << "║" << std::endl;
-    std::cout << "║  💾 Max Body:     " << std::setw(32) << server._maxBodySize << "║" << std::endl;
-    std::cout << "║  ⏱️  Req Timeout:  " << std::setw(32) << server._reqTimeout  << "║" << std::endl;
-    std::cout << "║  ⚡ CGI Timeout:  " << std::setw(32) << server._cgiTimeout  << "║" << std::endl;
+    std::cout << "║  💾 Max Body:     " << std::setw(32) << server._maxBodySize.str << "║" << std::endl;
+    std::cout << "║  ⏱️  Req Timeout:  " << std::setw(32) << server._reqTimeout.str  << "║" << std::endl;
+    std::cout << "║  ⚡ CGI Timeout:  " << std::setw(32) << server._cgiTimeout.str  << "║" << std::endl;
     std::cout << "╚═══════════════════════════════════════════════════╝" << std::endl;
     std::cout << std::endl;
-    
-    // std::cout << "\n--- Error Pages ---\n" << std::endl;
-    // for (size_t i = 0; i < server._errorPages.size(); i++) {
-    //     std::cout << "  " << server._errorPages[i].typeCode << " -> " << server._errorPages[i].link << std::endl;
-    // }
-    
-    // std::cout << "\n--- Locations ---\n" << std::endl;
-    // for (size_t i = 0; i < server._locations.size(); i++) {
-    //     std::cout << "---> Location: " << server._locations[i]->url << std::endl;
-    //     Node* current = server._locations[i]->next;
-    //     while (current != NULL) {
-    //         std::cout << "    " << current->key << " = " << current->value << std::endl;
-    //         current = current->next;
-    //     }
-    //     std::cout << std::endl;
-    // }
 }
 
 void printInstructions()
@@ -1101,25 +1216,20 @@ void cleanupClient(int epoll_fd, clientData *cData, std::map<int, clientData*>& 
         
     printf("Cleaning up client %d\n", cData->fd);
     
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->fd, NULL) == -1)
+    int fd = cData->fd;
+    int fileFd = cData->fileFd;
+    
+    clientDataMap.erase(fd);
+    
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL) == -1)
         perror("EPOLL_CTL_DEL during cleanup");
     
-    clientDataMap.erase(cData->fd);
+    if (fileFd != -1)
+        close(fileFd);
+    if (fd > 0)
+        close(fd);
     
-    if (cData->fd > 0)
-        close(cData->fd);
-    if (cData->fileFd != -1)
-        close(cData->fileFd);
-        
     delete cData;
-}
-
-Location* findLocation(Server& server, const std::string& path)
-{
-    for (size_t i = 0; i < server._locations.size(); i++)
-        if (path == server._locations[i].url)
-            return &server._locations[i];
-    return (NULL);
 }
 
 std::string replacePlaceholders(std::string content, Server& server,
@@ -1144,7 +1254,7 @@ std::string replacePlaceholders(std::string content, Server& server,
     while ((pos = content.find("{{FAILED}}")) != std::string::npos)
         content.replace(pos, 10, failedRedirect);
     
-    std::string maxSize = server._maxBodySize;
+    std::string maxSize = server._maxBodySize.str;
     while ((pos = content.find("{{MAXSIZE}}")) != std::string::npos)
         content.replace(pos, 11, maxSize);
     
@@ -1509,8 +1619,137 @@ std::string readMediaViewerTemplate()
 </html>)";
 }
 
-std::string getHandle(httpClientRequest *req, Server server, clientData *data)
+bool checkLocationRestrict(std::string str, Server server)
 {
+    int pos = str.find_last_of("/");
+    if (pos != std::string::npos)
+    {
+        std::string tmp = str.substr(0, pos);
+        Location* loc = findLocation(server, tmp);
+        if (loc)
+            if (loc->getValue("allowed_methods").find("GET") != std::string::npos)
+                return (true);
+    }
+    return (false);
+}
+
+class CgiEnv
+{
+    private:
+        std::vector<std::string> env_strings;
+        std::vector<char*> env_ptrs;
+        
+    public:
+        CgiEnv() {};
+        ~CgiEnv() {};
+        
+        void setEnv(const std::string& key, const  std::string& value)
+        {
+            if (key.empty() || value.empty())
+                return;
+            
+            std::string env_var = key + "=" + value;
+            env_strings.push_back(env_var);
+        }
+        char** getEnvp()
+        {
+            env_ptrs.clear();
+            for (auto& s : env_strings)
+                env_ptrs.push_back(const_cast<char*>(s.c_str()));
+            env_ptrs.push_back(NULL);
+
+            return (env_ptrs.data());
+        }
+        void setEnvInt(const char* key, int value)
+        {
+            setEnv(key, std::to_string(value));
+        }
+};
+
+std::string startCgiRequest(httpClientRequest *req, Server server,
+        clientData *data, Location* loc, int epoll_fd)
+{
+    int     pid;
+    int     pipeFd[2];
+    CgiEnv  Env;
+
+    if (pipe(pipeFd) == -1)
+        return (sendErrorCode(500, server, data));
+    pid = fork();
+    if (pid < 0)
+        return (close(pipeFd[0]), close(pipeFd[1]), sendErrorCode(500, server, data));
+    if (pid == 0)
+    {
+        close(pipeFd[0]);
+        if (dup2(pipeFd[1], STDOUT_FILENO) < 0)
+            return (close(pipeFd[1]), "-1");
+        close(pipeFd[1]);
+
+        Env.setEnv("REQUEST_METHOD", req->_method);
+        Env.setEnv("SCRIPT_NAME", req->_path);
+        Env.setEnv("CONTENT_TYPE", req->_contentType.empty() ? "" : req->_contentType);
+        Env.setEnv("CONTENT_LENGTH", req->_contentLength.empty() ? "0" : req->_contentLength);
+
+        // Server information
+        Env.setEnv("SERVER_NAME", server._serverName);
+        Env.setEnvInt("SERVER_PORT", data->serverPort);
+        Env.setEnv("SERVER_PROTOCOL", "HTTP/1.0");
+        Env.setEnv("SERVER_SOFTWARE", "WebServ/1.0");
+        Env.setEnv("GATEWAY_INTERFACE", "CGI/1.1");
+
+        // Request information
+        Env.setEnv("REQUEST_URI", req->_path);
+        Env.setEnv("PATH_INFO", req->_path);
+        Env.setEnv("REMOTE_ADDR", data->clientIp);
+        Env.setEnvInt("REMOTE_PORT", data->clientPort);
+
+        // HTTP headers
+        Env.setEnv("HTTP_HOST", req->_host);
+        if (!req->_userAgent.empty())
+            Env.setEnv("HTTP_USER_AGENT", req->_userAgent);
+        if (!req->_accept.empty())
+            Env.setEnv("HTTP_ACCEPT", req->_accept);
+        if (!req->_referer.empty())
+            Env.setEnv("HTTP_REFERER", req->_referer);
+        if (!req->_cookie.empty())
+            Env.setEnv("HTTP_COOKIE", req->_cookie);
+
+        std::string tmp = req->_path;
+        std::string ext = tmp.substr(tmp.find_last_of("."));
+        std::string op = loc->getValue(ext);
+        std::cout << op << std::endl;
+        char *argv[] =
+        {
+            (char *)op.c_str(),
+            (char *)(req->_path).c_str(),
+            NULL
+        };
+
+        execve(argv[0], argv, Env.getEnvp());
+        
+        return "";
+    }
+    else
+    {
+        close(pipeFd[1]);
+        data->cgiFd = pipeFd[0];
+        data->cgiPid = pid;
+        data->state = WAITING_CGI_OUTPUT;
+
+        struct epoll_event cgi_event;
+        cgi_event.events = EPOLLIN;
+        cgi_event.data.fd = data->cgiFd;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, data->cgiFd, &cgi_event);
+
+        return "";
+    }
+}
+
+std::string getHandle(httpClientRequest *req, Server server, clientData *data, int epoll_fd)
+{
+    if ((long)std::time(NULL) - (long)data->requestStartTime >= (long)server._reqTimeout.num)
+       return (sendErrorCode(408, server, data));
+
     std::string response;
     int     flag = 0;
     bool    isFile = 1;
@@ -1527,7 +1766,6 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
         flag = 1;
         return (response);
     }
-
     
     std::string fullPath = req->_path;
     int tmp = fullPath.find_last_of("/");
@@ -1543,7 +1781,7 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
     }
     
     if (fullPath[0] == '/' && fullPath[1])
-    fullPath = fullPath.substr(1);
+        fullPath = fullPath.substr(1);
 
     if (access(fullPath.c_str(), F_OK) < 0)
         isFile = 0;
@@ -1562,6 +1800,8 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
             return (sendErrorCode(404, server, data));
         if (!isForb)
             return (sendErrorCode(403, server, data));
+        if (!checkLocationRestrict(req->_path, server))
+            return (sendErrorCode(405, server, data));
         if (isFile && isForb)
         {
             bool isHtmlFile = (fullPath.substr(fullPath.find_last_of(".") + 1) == "html");
@@ -1650,7 +1890,6 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
                 }
                 else
                 {
-                    // Serve the raw media file (request from <img>/<video>/<audio> tag)
                     std::string response = "HTTP/1.1 200 OK\r\n";
                     response += "Content-Type: " + contentType + "\r\n";
                     response += "Content-Length: " + std::to_string(content.length()) + "\r\n";
@@ -1659,6 +1898,11 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
                     
                     return response;
                 }
+            }
+            else if (isValidCgiRequest(req, server) && data->state != WAITING_CGI_OUTPUT)
+            {
+                std::cout << "valid cgi req" << std::endl;
+                return (startCgiRequest(req, server, data, loc, epoll_fd));
             }
             else
             {
@@ -1704,10 +1948,8 @@ std::string getHandle(httpClientRequest *req, Server server, clientData *data)
 
     if (loc->is_redirect)
     {
-        std::string tmp = req->_path;
-        tmp.replace(0, tmp.length(), loc->redirect_url);
-        response = "HTTP/1.0 " + to_string(loc->redirect_code) + " Found\r\n";
-        response += "Location: " + tmp + "\r\n";
+        response = "HTTP/1.0 " + std::to_string(loc->redirect_code) + " Found\r\n";
+        response += "Location: " + loc->redirect_url + "\r\n";
         response += "Connection: close\r\n\r\n";
         return (response);
     }
@@ -1824,6 +2066,7 @@ void    createServerBlocks(std::string &config, std::vector<Server> *servers)
         }
         servers->push_back(newServer);
     }
+
 }
 
 ServerSocket* findServerSocket(std::vector<ServerSocket>& serverSockets, int fd)
@@ -1900,13 +2143,22 @@ unsigned long convertIPtoLong(const std::string& ip_str)
     return htonl(ip_long);
 }
 
+std::string convertLongToIP(unsigned long ip_long)
+{
+    unsigned char *ip_bytes = (unsigned char*)&ip_long;
+    
+    std::string ip_str = std::to_string(ip_bytes[0]) + "." +
+                         std::to_string(ip_bytes[1]) + "." +
+                         std::to_string(ip_bytes[2]) + "." +
+                         std::to_string(ip_bytes[3]);
+    
+    return ip_str;
+}
+
 void signal_handler(int sig)
 {
     if (sig == SIGINT || sig == SIGTERM) // sigterm can be deleated
-    {
         std::cout << "\nCleaning and exiting..." << std::endl;
-        _ssig = 0;
-    }
 }
 
 void setup_signals()
@@ -1919,6 +2171,66 @@ void setup_signals()
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);    
     signal(SIGPIPE, SIG_IGN);
+}
+
+void    finalizeReq(Server server, clientData *cData, int cliefd,
+            int epoll_fd, std::map<int, clientData*>& clientDataMap)
+{
+    if ((long)std::time(NULL) - (long)cData->requestStartTime >= (long)server._reqTimeout.num)
+    {
+        cData->response_data = sendErrorCode(408, server, cData);
+        cData->state = SENDING_RESPONSE;
+        
+        struct epoll_event modify_event;
+        modify_event.events = EPOLLOUT;
+        modify_event.data.fd = cliefd;
+        
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cliefd, &modify_event) == -1)
+        {
+            perror("epoll_ctl MOD to EPOLLOUT");
+            cleanupClient(epoll_fd, cData, clientDataMap);
+        }
+        return;
+    }
+    else
+    {
+        std::string fileName = cData->filename;
+        std::ifstream requestFile(fileName, std::ios::binary);
+        if (requestFile)
+        {
+            std::stringstream buffer;
+            buffer << requestFile.rdbuf();
+            cData->request_data = buffer.str();
+            requestFile.close();
+            std::remove(fileName.c_str());
+        }
+
+        httpClientRequest* req = new httpClientRequest();
+        req->parseRequest(cData->request_data);
+
+        if (req->_method == "GET")
+            cData->response_data = getHandle(req, server, cData, epoll_fd);
+        else if (req->_method == "POST")
+            cData->response_data = postHandle(req, server, cData);
+        else if (req->_method == "DELETE")
+            cData->response_data = deleteHandle(req, server, cData);
+        else
+            cData->response_data = sendErrorCode(405, server, cData);
+
+        cData->state = SENDING_RESPONSE;
+        delete req;
+
+        struct epoll_event modify_event;
+        modify_event.events = EPOLLOUT;
+        modify_event.data.fd = cliefd;
+        
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cliefd, &modify_event) == -1)
+        {
+            perror("epoll_ctl MOD to EPOLLOUT");
+            cleanupClient(epoll_fd, cData, clientDataMap);
+        }
+    }
+    return;
 }
 
 int main(int ac, char **av)
@@ -2024,7 +2336,6 @@ int main(int ac, char **av)
                 perror("Server epoll_ctl()");
                 continue;
             }
-
             serverSockets.push_back(ServerSocket(sockfd, servers[i]._serverPort[j], i));
         }
     }
@@ -2052,9 +2363,6 @@ int main(int ac, char **av)
             break;
         }
 
-        if (!_status)
-            break;
-
         for (int i = 0; i < readyEvents; i++)
         {
             int eventFd = events[i].data.fd;
@@ -2076,6 +2384,11 @@ int main(int ac, char **av)
                 data->serverIndex = serverSock->serIndex;
                 data->serverPort = serverSock->port;
                 
+                struct sockaddr_in *client_addr = (struct sockaddr_in*)&clie_add;
+                data->clientIp = convertLongToIP(client_addr->sin_addr.s_addr);
+                data->clientPort = ntohs(client_addr->sin_port);
+                data->serverIp = servers[data->serverIndex]._serverIp;
+
                 struct epoll_event client_event;
                 client_event.events = EPOLLIN;
                 client_event.data.fd = cliefd;
@@ -2093,7 +2406,6 @@ int main(int ac, char **av)
             }
             else
             {
-                // Client event
                 int cliefd = events[i].data.fd;
                 clientData *cData = clientDataMap[cliefd];
                 
@@ -2102,6 +2414,44 @@ int main(int ac, char **av)
                     printf("No client data for fd %d\n", cliefd);
                     continue;
                 }
+
+                if (cData->cgiFd > 0 && cData->cgiFd == cliefd && events[i].events & EPOLLIN)
+                {
+                    char buffer[4096];
+                    ssize_t bytes = read(cliefd, buffer, sizeof(buffer));
+                    
+                    if (bytes > 0)
+                        cData->CgiBody += std::string(buffer, bytes);
+                    else if (bytes == 0)
+                    {
+                        int status;
+                        waitpid(cData->cgiPid, &status, 0);
+                        
+                        if (WIFEXITED(status))
+                        {
+                            int exit_code = WEXITSTATUS(status);
+                            if (exit_code != 0)
+                                cData->response_data = sendErrorCode(502, servers[cData->serverIndex], cData);
+                            else
+                            {
+                                cData->response_data = "HTTP/1.1 200 OK\r\n";
+                                cData->response_data += "Content-Type: text/html\r\n";
+                                cData->response_data += "Content-Length: " + std::to_string(cData->CgiBody.length()) + "\r\n";
+                                cData->response_data += "Connection: close\r\n\r\n";
+                                cData->response_data += cData->CgiBody;
+                            }
+                        }
+                        
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
+                        close(cData->cgiFd);
+                        cData->cgiFd = -1;
+                        cData->state = SENDING_RESPONSE;
+                    }
+                    continue;
+                }
+
+                if (cData->requestStartTime == 0)
+                    cData->requestStartTime = static_cast<long>(std::time(nullptr));
 
                 if (events[i].events & EPOLLIN)
                 {
@@ -2148,7 +2498,7 @@ int main(int ac, char **av)
                                     {
                                         perror("file open()");
                                         cleanupClient(epoll_fd, cData, clientDataMap);
-                                        // std::remove(fileStr.c_str());
+                                        std::remove(fileStr.c_str());
                                         continue;
                                     }
                                     ssize_t bytes_written = write(cfd, cData->headerStr.c_str(), cData->headerStr.size());
@@ -2200,47 +2550,11 @@ int main(int ac, char **av)
                         }
                         
                         if (cData->body_complete && cData->ccFlag == 0)
-                        {
-                            std::string fileName = cData->filename;
-                            std::ifstream requestFile(fileName, std::ios::binary);
-                            if (requestFile)
-                            {
-                                std::stringstream buffer;
-                                buffer << requestFile.rdbuf();
-                                cData->request_data = buffer.str();
-                                requestFile.close();
-                                // std::remove(fileName.c_str());
-                            }
-
-                            httpClientRequest* req = new httpClientRequest();
-                            req->parseRequest(cData->request_data);
-                            
-                            if (req->_method == "GET")
-                                cData->response_data = getHandle(req, servers[cData->serverIndex], cData);
-                            else if (req->_method == "POST")
-                                cData->response_data = postHandle(req, servers[cData->serverIndex], cData);
-                            else if (req->_method == "DELETE")
-                                cData->response_data = deleteHandle(req, servers[cData->serverIndex], cData);
-                            else
-                                cData->response_data = sendErrorCode(405, servers[cData->serverIndex], cData);
-
-                            cData->state = SENDING_RESPONSE;
-                            delete req;
-
-                            struct epoll_event modify_event;
-                            modify_event.events = EPOLLOUT;
-                            modify_event.data.fd = cliefd;
-                            
-                            if (epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cliefd, &modify_event) == -1)
-                            {
-                                perror("epoll_ctl MOD to EPOLLOUT");
-                                cleanupClient(epoll_fd, cData, clientDataMap);
-                            }
-                        }
+                            finalizeReq(servers[cData->serverIndex], cData, cliefd, epoll_fd, clientDataMap);
                     }
                 }
                 
-                if (events[i].events & EPOLLOUT)
+                else if (events[i].events & EPOLLOUT)
                 {
                     if (cData->state == SENDING_RESPONSE && !cData->response_data.empty())
                     {
@@ -2259,10 +2573,7 @@ int main(int ac, char **av)
                         cData->bytes_sent += bytes_sent;
                         
                         if (cData->bytes_sent >= cData->response_data.length())
-                        {
                             cleanupClient(epoll_fd, cData, clientDataMap);
-                            cData->state = FINISHED;
-                        }
                     }
                 }
 

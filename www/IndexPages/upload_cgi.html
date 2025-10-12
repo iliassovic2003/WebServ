@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CGI Upload</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                background: #0a0a0a;
+                color: #e0e0e0;
+                min-height: 100vh;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                overflow-x: hidden;
+            }
+
+            .bubbles {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                z-index: 0;
+                overflow: hidden;
+                pointer-events: none;
+            }
+
+            .bubble {
+                position: absolute;
+                bottom: -100px;
+                background: radial-gradient(circle, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.2));
+                border-radius: 50%;
+                opacity: 0.6;
+                animation: rise 15s infinite ease-in;
+            }
+
+            .bubble:nth-child(1) { width: 80px; height: 80px; left: 10%; animation-duration: 12s; animation-delay: 0s; }
+            .bubble:nth-child(2) { width: 60px; height: 60px; left: 20%; animation-duration: 14s; animation-delay: 2s; }
+            .bubble:nth-child(3) { width: 100px; height: 100px; left: 35%; animation-duration: 16s; animation-delay: 4s; }
+            .bubble:nth-child(4) { width: 70px; height: 70px; left: 50%; animation-duration: 13s; animation-delay: 1s; }
+            .bubble:nth-child(5) { width: 90px; height: 90px; left: 65%; animation-duration: 15s; animation-delay: 3s; }
+            .bubble:nth-child(6) { width: 120px; height: 120px; left: 75%; animation-duration: 17s; animation-delay: 5s; }
+            .bubble:nth-child(7) { width: 75px; height: 75px; left: 85%; animation-duration: 14s; animation-delay: 2.5s; }
+
+            @keyframes rise {
+                0% {
+                    bottom: -100px;
+                    transform: translateX(0);
+                    opacity: 0.6;
+                }
+                50% {
+                    transform: translateX(100px);
+                    opacity: 0.8;
+                }
+                100% {
+                    bottom: 110%;
+                    transform: translateX(-50px);
+                    opacity: 0;
+                }
+            }
+
+            .container {
+                position: relative;
+                z-index: 1;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 3rem 2rem;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
+
+            header {
+                text-align: center;
+                margin-bottom: 3rem;
+                padding: 2rem;
+                backdrop-filter: blur(10px);
+            }
+
+            h1 {
+                font-size: 2.5rem;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                margin-bottom: 0.5rem;
+            }
+
+            .subtitle {
+                font-size: 1.1rem;
+                color: #a0a0a0;
+                margin-top: 0.5rem;
+            }
+
+            .upload-container {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                padding: 2rem;
+                backdrop-filter: blur(10px);
+            }
+
+            .form-group {
+                margin-bottom: 2rem;
+            }
+
+            label {
+                display: block;
+                color: #667eea;
+                font-weight: 600;
+                margin-bottom: 0.75rem;
+                font-size: 1rem;
+            }
+
+            input[type="text"] {
+                width: 100%;
+                padding: 1rem;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 8px;
+                color: #e0e0e0;
+                font-size: 1rem;
+                transition: all 0.3s ease;
+            }
+
+            input[type="text"]:focus {
+                outline: none;
+                border-color: rgba(102, 126, 234, 0.6);
+                background: rgba(255, 255, 255, 0.08);
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }
+
+            input[type="text"]::placeholder {
+                color: #666;
+            }
+
+            .file-drop-zone {
+                border: 2px solid rgba(102, 126, 234, 0.4);
+                border-radius: 12px;
+                padding: 3rem 2rem;
+                text-align: center;
+                background: rgba(255, 255, 255, 0.02);
+                transition: all 0.3s ease;
+                cursor: pointer;
+                position: relative;
+            }
+
+            .file-drop-zone:hover {
+                border-color: rgba(102, 126, 234, 0.7);
+                background: rgba(102, 126, 234, 0.05);
+            }
+
+            .file-drop-zone input[type="file"] {
+                position: absolute;
+                opacity: 0;
+                width: 100%;
+                height: 100%;
+                top: 0;
+                left: 0;
+                cursor: pointer;
+            }
+
+            .upload-icon {
+                font-size: 4rem;
+                margin-bottom: 1rem;
+                opacity: 0.6;
+            }
+
+            .upload-text {
+                font-size: 1.2rem;
+                color: #a0a0a0;
+                margin-bottom: 0.5rem;
+            }
+
+            .upload-hint {
+                font-size: 0.9rem;
+                color: #666;
+            }
+
+            .file-info {
+                display: none;
+                background: rgba(102, 126, 234, 0.1);
+                border: 1px solid rgba(102, 126, 234, 0.3);
+                border-radius: 8px;
+                padding: 1.5rem;
+                margin-top: 1rem;
+            }
+
+            .file-info.active {
+                display: block;
+            }
+
+            .file-name {
+                font-size: 1.1rem;
+                font-weight: 600;
+                color: #e0e0e0;
+                margin-bottom: 0.5rem;
+                word-break: break-all;
+            }
+
+            .file-details {
+                display: flex;
+                gap: 2rem;
+                font-size: 0.9rem;
+                color: #a0a0a0;
+            }
+
+            .file-size {
+                color: #667eea;
+                font-weight: 600;
+            }
+
+            .button-group {
+                display: flex;
+                gap: 1rem;
+                margin-top: 2rem;
+            }
+
+            button {
+                flex: 1;
+                padding: 1rem 2rem;
+                border: none;
+                border-radius: 8px;
+                font-size: 1rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+
+            .btn-upload {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+
+            .btn-upload:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+            }
+
+            .btn-upload:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .btn-clear {
+                background: rgba(255, 255, 255, 0.05);
+                color: #e0e0e0;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+
+            .btn-clear:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.3);
+            }
+
+            .info-box {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                padding: 1.5rem;
+                margin-top: 2rem;
+            }
+
+            .info-box h3 {
+                color: #667eea;
+                margin-bottom: 1rem;
+                font-size: 1rem;
+            }
+
+            .info-box ul {
+                list-style: none;
+                color: #a0a0a0;
+                font-size: 0.9rem;
+                line-height: 1.8;
+            }
+
+            .info-box li:before {
+                content: "→ ";
+                color: #667eea;
+                font-weight: bold;
+                margin-right: 0.5rem;
+            }
+
+            footer {
+                text-align: center;
+                margin-top: 4rem;
+                padding: 1.5rem;
+                color: #666;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            @media (max-width: 768px) {
+                .button-group {
+                    flex-direction: column;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="bubbles">
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+            <div class="bubble"></div>
+        </div>
+
+        <div class="container">
+            <header>
+                <h1>File Upload</h1>
+                <p class="subtitle">Upload files to your WebServ server</p>
+            </header>
+
+            <div class="upload-container">
+                <form id="uploadForm" action="/upload" method="POST">
+                    <div class="form-group">
+                        <label for="customFilename">Custom Filename (optional)</label>
+                        <input 
+                            type="text" 
+                            id="customFilename" 
+                            name="filename" 
+                            placeholder="Leave empty to use original filename"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label>Select File</label>
+                        <div class="file-drop-zone" id="dropZone">
+                            <input 
+                                type="file" 
+                                id="fileInput" 
+                                name="file" 
+                                accept="*/*"
+                            >
+                            <div class="upload-icon">📁</div>
+                            <div class="upload-text">Click to browse and select a file</div>
+                            <div class="upload-hint">Maximum file size: {{MAXSIZE}}B</div>
+                        </div>
+
+                        <div class="file-info" id="fileInfo">
+                            <div class="file-name" id="fileName"></div>
+                            <div class="file-details">
+                                <div>Size: <span class="file-size" id="fileSize"></span></div>
+                                <div>Type: <span id="fileType"></span></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="button-group">
+                        <button type="submit" class="btn-upload" id="uploadBtn" disabled>
+                            Upload File
+                        </button>
+                        <button type="button" class="btn-clear" id="clearBtn">
+                            Clear
+                        </button>
+                    </div>
+                </form>
+
+                <div class="info-box">
+                    <h3>Upload Guidelines</h3>
+                    <ul>
+                        <li>Custom filename is optional - original name will be used if left empty</li>
+                        <li>File extensions will be preserved automatically</li>
+                        <li>Maximum file size is {{MAXSIZE}}B</li>
+                        <li>All file types are supported</li>
+                    </ul>
+                </div>
+            </div>
+
+            <footer>
+                <p>WebServ File Upload • HTTP/1.0</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem;">Powered by caffeine and determination</p>
+            </footer>
+        </div>
+
+        <script>
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const fileInfo = document.getElementById('fileInfo');
+            const fileName = document.getElementById('fileName');
+            const fileSize = document.getElementById('fileSize');
+            const fileType = document.getElementById('fileType');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const uploadForm = document.getElementById('uploadForm');
+            const customFilename = document.getElementById('customFilename');
+
+            let selectedFile = null;
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+
+            function handleFile(file)
+            {
+                selectedFile = file;
+                
+                fileName.textContent = file.name;
+                fileSize.textContent = formatFileSize(file.size);
+                fileType.textContent = file.type || 'Unknown';
+                
+                fileInfo.classList.add('active');
+                uploadBtn.disabled = false;
+            }
+
+            function formatFileSize(bytes)
+            {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+            }
+
+            clearBtn.addEventListener('click', () => {
+                fileInput.value = '';
+                customFilename.value = '';
+                selectedFile = null;
+                fileInfo.classList.remove('active');
+                uploadBtn.disabled = true;
+            });
+
+            uploadForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                if (!selectedFile)
+                    return;
+
+                let filename = customFilename.value.trim();
+                
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Uploading...';
+
+                try {
+                    const fileBuffer = await selectedFile.arrayBuffer();
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': selectedFile.type || 'application/octet-stream',
+                            'Filename': filename
+                        },
+                        body: fileBuffer
+                    });
+                    const text = await response.text();
+                    console.log('Response body:', text);
+
+                    if (response.ok)
+                        window.location.href = '{{SUCCESS}}';
+                    else
+                        window.location.href = '{{FAILED}}';
+                }
+                catch (error) {
+                    window.location.href = '{{FAILED}}';
+                }
+            });
+        </script>
+    </body>
+</html>

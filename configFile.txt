@@ -8,7 +8,7 @@ server {
 
     root /www;
 
-    request_timeout 20S;
+    request_timeout 5S;
     CGI_script_timeout 20S;
     client_max_body_size 100M;
 
@@ -16,11 +16,9 @@ server {
     error_page 403 /403.html;
     error_page 500 /500.html;
     error_page 502 /502.html;
-    error_page 503 /503.html;
-    error_page 504 /504.html;
 
     location / {
-        return 307 /home;
+        return 302 /home;
         allowed_methods GET;
     }
 
@@ -60,12 +58,12 @@ server {
 
     location /cgi-bin {
         root /www/CGI-bin;
-        allowed_methods GET POST;
+        allowed_methods GET;
         cgi_enable on;
-        cgi_pass .php /usr/bin/php-cgi;
-        cgi_pass .py /usr/bin/python3;
-        cgi_pass .pl /usr/bin/perl;
-        cgi_pass .sh /usr/bin/bash;
+        .php /usr/bin/php-cgi;
+        .py /usr/bin/python3;
+        .pl /usr/bin/perl;
+        .sh /usr/bin/bash;
         auto_index on;
     }
 
@@ -116,5 +114,15 @@ server {
     location /errors {
         root /www/ErrorPages;
         allowed_methods GET;
+    }
+
+    location /cgi-bin {
+        root /www/CGI-bin;
+        index upload_cgi.html;
+        allowed_methods POST;
+        .php /usr/bin/php-cgi;
+        .py /usr/bin/python3;
+        .pl /usr/bin/perl;
+        .sh /usr/bin/bash;
     }
 }
