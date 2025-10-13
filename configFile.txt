@@ -73,8 +73,8 @@ server {
         auto_index on;
     }
 
-    location /errors/aiooo {
-        root /www/ErrorPages/aiooo;
+    location /errors/testFiles {
+        root /www/ErrorPages/testFiles;
         allowed_methods GET;
         auto_index on;
     }
@@ -101,28 +101,30 @@ server {
         allowed_methods GET;
     }
 
-    location /upload {
-        root /www/IndexPages;
-        index upload_form.html;
-        allowed_methods GET POST;
-        upload_enable on;
-        upload_store /www/Upload;
-        success_redirect /upload-success;
-        failed_redirect /upload-failed;
-    }
-
     location /errors {
         root /www/ErrorPages;
         allowed_methods GET;
     }
 
     location /cgi-bin {
-        root /www/CGI-bin;
+        root /www/IndexPages;
         index upload_cgi.html;
-        allowed_methods POST;
-        .php /usr/bin/php-cgi;
-        .py /usr/bin/python3;
-        .pl /usr/bin/perl;
-        .sh /usr/bin/bash;
+        allowed_methods GET POST;
+        upload_enable on;
+        upload_store /www/CGI-bin;
+        success_redirect /upload-success;
+        failed_redirect /upload-failed;
+    }
+
+    location /upload-success {
+        root /www/IndexPages;
+        index Cgi-success.html;
+        allowed_methods GET;
+    }
+
+    location /upload-failed {
+        root /www/IndexPages;
+        index Cgi-failed.html;
+        allowed_methods GET;
     }
 }

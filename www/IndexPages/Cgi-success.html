@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Failed</title>
+    <title>Upload Success</title>
     <style>
         * {
             margin: 0;
@@ -78,40 +78,42 @@
             text-align: center;
         }
 
-        .error-icon {
+        .success-icon {
             width: 120px;
             height: 120px;
             margin-bottom: 2rem;
-            background: rgba(244, 67, 54, 0.2);
-            border: 3px solid #f44336;
+            background: rgba(76, 175, 80, 0.2);
+            border: 3px solid #4caf50;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 4rem;
-            animation: shake 0.5s ease-out;
+            animation: scaleIn 0.5s ease-out;
         }
 
-        @keyframes shake {
-            0%, 100% {
-                transform: translateX(0);
+        @keyframes scaleIn {
+            0% {
+                transform: scale(0);
+                opacity: 0;
             }
-            10%, 30%, 50%, 70%, 90% {
-                transform: translateX(-10px);
+            50% {
+                transform: scale(1.1);
             }
-            20%, 40%, 60%, 80% {
-                transform: translateX(10px);
+            100% {
+                transform: scale(1);
+                opacity: 1;
             }
         }
 
-        .cross {
-            color: #f44336;
+        .checkmark {
+            color: #4caf50;
             font-weight: bold;
         }
 
         h1 {
             font-size: 2.5rem;
-            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -180,33 +182,18 @@
         }
 
         .info-box {
-            background: rgba(244, 67, 54, 0.1);
-            border: 1px solid rgba(244, 67, 54, 0.3);
+            background: rgba(76, 175, 80, 0.1);
+            border: 1px solid rgba(76, 175, 80, 0.3);
             border-radius: 8px;
             padding: 1.5rem;
             margin-top: 3rem;
             animation: fadeInUp 0.6s ease-out 0.8s both;
         }
 
-        .info-box h3 {
-            color: #f44336;
-            margin-bottom: 1rem;
-            font-size: 1.1rem;
-        }
-
-        .info-box ul {
-            list-style: none;
+        .info-box p {
             color: #a0a0a0;
             font-size: 0.95rem;
-            line-height: 1.8;
-            text-align: left;
-        }
-
-        .info-box li:before {
-            content: "• ";
-            color: #f44336;
-            font-weight: bold;
-            margin-right: 0.5rem;
+            line-height: 1.6;
         }
 
         footer {
@@ -217,7 +204,6 @@
             text-align: center;
             padding: 1.5rem;
             color: #666;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         @media (max-width: 768px) {
@@ -225,7 +211,7 @@
                 font-size: 2rem;
             }
             
-            .error-icon {
+            .success-icon {
                 width: 100px;
                 height: 100px;
                 font-size: 3rem;
@@ -254,28 +240,23 @@
     </div>
 
     <div class="container">
-        <div class="error-icon">
-            <span class="cross">✗</span>
+        <div class="success-icon">
+            <span class="checkmark">✓</span>
         </div>
 
-        <h1>Upload Failed</h1>
+        <h1>Upload Successful!</h1>
 
         <p class="message">
-            We couldn't complete your file upload. Please try again.
+            Your file has been successfully uploaded to the server.
         </p>
 
         <div class="actions">
-            <a href="/upload" class="btn btn-primary">Try Again</a>
+            <a href="/cgi-bin" class="btn btn-primary">Upload Another File</a>
             <a href="/" class="btn btn-secondary">Back to Home</a>
         </div>
 
         <div class="info-box">
-            <h3>Possible Causes:</h3>
-            <ul>
-                <li>File size exceeds the maximum limit</li>
-                <li>Server storage is full</li>
-                <li>Network connection interrupted</li>
-            </ul>
+            <p>You can now upload additional files or return to the dashboard.</p>
         </div>
     </div>
 
