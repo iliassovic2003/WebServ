@@ -1338,8 +1338,6 @@ std::string getFileIcon(const std::string& filename, bool isDirectory)
         return "📄";
     else if (ext == ".css")
         return "🎨";
-    else if (ext == ".js")
-        return "⚡";
     else if (ext == ".json")
         return "📊";
     else if (ext == ".txt")
@@ -1356,6 +1354,16 @@ std::string getFileIcon(const std::string& filename, bool isDirectory)
         return "📕";
     else if (ext == ".py")
         return "🐍";
+    else if (ext == ".php")
+        return "🐘";
+    else if (ext == ".pl")
+        return "🐪";
+    else if (ext == ".rb")
+        return "💎";
+    else if (ext == ".js")
+        return "📜";
+    else if (ext == ".sh")
+        return "🐚";
     else if (ext == ".cpp" || ext == ".c" || ext == ".h" || ext == ".hpp")
         return "⚙️";
     
@@ -2446,20 +2454,25 @@ int main(int ac, char **av)
                     continue;
                 }
 
-                if (cData->cgiFd > 0 && cData->cgiFd == cliefd
-                        && events[i].events & (EPOLLIN | EPOLLHUP))
+                if (cData->cgiFd > 0 && cData->cgiFd == cliefd 
+                    && events[i].events & (EPOLLIN | EPOLLHUP))
+                {
+                    char buffer[4096];
+                    ssize_t bytes = read(cliefd, buffer, sizeof(buffer));
+                                        
+                    if (bytes > 0)
+                        cData->CgiBody += std::string(buffer, bytes);
+                    
+                    if (bytes == 0)  
                     {
-                        char buffer[4096];
-                        ssize_t bytes = read(cliefd, buffer, sizeof(buffer));
+                        printf("DEBUG: CGI pipe EOF - processing completion\n");
                         
-                        if (bytes > 0)
-                            cData->CgiBody += std::string(buffer, bytes);
-                        if (bytes == 0 || (events[i].events & EPOLLHUP))
-                        {                            
-                            int status;
-                            pid_t result = waitpid(cData->cgiPid, &status, WNOHANG);
-                            
-                            if (result == cData->cgiPid && WIFEXITED(status) && WEXITSTATUS(status) == 0) 
+                        int status;
+                        pid_t result = waitpid(cData->cgiPid, &status, WNOHANG);
+                        
+                        if (result == cData->cgiPid) 
+                        {
+                            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) 
                             {
                                 cData->response_data = "HTTP/1.1 200 OK\r\n";
                                 cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
@@ -2483,22 +2496,72 @@ int main(int ac, char **av)
                                 client_event.data.fd = cData->fd;
                                 epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
                             }
-                            
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
-                            clientDataMap.erase(cData->cgiFd);
-                            close(cData->cgiFd);
-                            cData->cgiFd = -1;
-                            cData->cgiPid = -1;
                         }
-                        else if (bytes < 0) 
+                        else if (result == 0) 
                         {
-                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
-                            clientDataMap.erase(cData->cgiFd);
-                            close(cData->cgiFd);
-                            cData->cgiFd = -1;
+                            usleep(10000);
+                            result = waitpid(cData->cgiPid, &status, WNOHANG);
+                            
+                            if (result == cData->cgiPid && WIFEXITED(status) && WEXITSTATUS(status) == 0) 
+                            {
+                                cData->response_data = "HTTP/1.1 200 OK\r\n";
+                                cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
+                                cData->response_data += "Content-Length: " + std::to_string(cData->CgiBody.length()) + "\r\n";
+                                cData->response_data += "Connection: close\r\n\r\n";
+                                cData->response_data += cData->CgiBody;
+                                cData->state = SENDING_RESPONSE;
+                                
+                                struct epoll_event client_event;
+                                client_event.events = EPOLLOUT;
+                                client_event.data.fd = cData->fd;
+                                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                            }
+                            else 
+                            {
+                                printf("DEBUG: CGI still not exited, killing and sending 500\n");
+                                kill(cData->cgiPid, SIGKILL);
+                                waitpid(cData->cgiPid, &status, 0);
+                                cData->response_data = sendErrorCode(500, servers[cData->serverIndex], cData);
+                                cData->state = SENDING_RESPONSE;
+                                
+                                struct epoll_event client_event;
+                                client_event.events = EPOLLOUT;
+                                client_event.data.fd = cData->fd;
+                                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                            }
                         }
-                        continue;
+                        else 
+                        {
+                            // waitpid error
+                            printf("DEBUG: waitpid error: %s\n", strerror(errno));
+                            cData->response_data = sendErrorCode(500, servers[cData->serverIndex], cData);
+                            cData->state = SENDING_RESPONSE;
+                            
+                            struct epoll_event client_event;
+                            client_event.events = EPOLLOUT;
+                            client_event.data.fd = cData->fd;
+                            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                        }
+                        
+                        // Cleanup regardless
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
+                        clientDataMap.erase(cData->cgiFd);
+                        close(cData->cgiFd);
+                        cData->cgiFd = -1;
+                        cData->cgiPid = -1;
                     }
+                    else if (bytes < 0) 
+                    {
+                        printf("DEBUG: CGI read error\n");
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
+                        clientDataMap.erase(cData->cgiFd);
+                        close(cData->cgiFd);
+                        cData->cgiFd = -1;
+                    }
+                    // If bytes > 0 OR bytes == -1 (EAGAIN) with EPOLLHUP, just continue
+                    // Don't trigger response yet - wait for actual EOF (bytes == 0)
+                    continue;
+                }
 
                 if (cData->requestStartTime == 0)
                     cData->requestStartTime = static_cast<long>(std::time(nullptr));
