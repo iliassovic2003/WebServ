@@ -9,7 +9,7 @@ print("<style>")
 print("body { font-family: Arial; background: linear-gradient(135deg, #3776ab 0%, #2e5e8f 100%); color: white; margin: 0; padding: 20px; min-height: 100vh; }")
 print(".container { max-width: 1000px; margin: 0 auto; }")
 print(".box { background: rgba(255,255,255,0.15); padding: 25px; margin: 15px 0; border-radius: 15px; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2); }")
-print(".python { color: #ffde57; font-weight: bold; text-shadow: 0 0 10px rgba(255,222,87,0.5); }")
+print(".python { color: #ffdzze57; font-weight: bold; text-shadow: 0 0 10px rgba(255,222,87,0.5); }")
 print(".header { text-align: center; padding: 30px 0; }")
 print(".feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 20px 0; }")
 print(".feature { background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px; border-left: 4px solid #ffde57; }")
@@ -56,15 +56,24 @@ print("</div>")
 print("<div class='box'>")
 print("<h2>💻 Example Code</h2>")
 print("<div class='code'>")
-print("# Simple Python function<br>")
+
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+squares = [x**2 for x in range(10)]
+
+print("<strong>Fibonacci Function:</strong><br>")
 print("def fibonacci(n):<br>")
 print("&nbsp;&nbsp;&nbsp;&nbsp;if n <= 1:<br>")
 print("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;return n<br>")
 print("&nbsp;&nbsp;&nbsp;&nbsp;return fibonacci(n-1) + fibonacci(n-2)<br>")
-print("<br>")
-print("# List comprehension example<br>")
+print("<div class='result'>fibonacci(10) = " + str(fibonacci(10)) + "</div><br>")
+
+print("<strong>List Comprehension:</strong><br>")
 print("squares = [x**2 for x in range(10)]<br>")
-print("print(squares)  # [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]")
+print("<div class='result'>" + str(squares) + "</div>")
 print("</div>")
 print("</div>")
 

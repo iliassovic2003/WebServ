@@ -140,6 +140,10 @@ class clientData
         int         ccFlag;
         int         posOffset;
         int         is_chunked;
+        int         cgiInputFd;
+        bool        cgiInputDone;
+        std::string cgiInputData;
+        long        cgiStartTime;
         uint64_t    totalSize;
         bool        headers_complete;
         bool        body_complete;
@@ -151,7 +155,8 @@ class clientData
                       totalSize(0), fd(-1), fileFd(-1), state(READING_HEADERS),
                       bytes_sent(0), headers_complete(false), body_complete(false),
                       ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0),
-                      requestStartTime(0), cgiFd(-1), CgiBody("") {}
+                      requestStartTime(0), cgiFd(-1), CgiBody(""), cgiInputFd(-1),
+                      cgiInputDone(false), cgiStartTime(0) {}
         ~clientData() {};
 };
 
@@ -673,7 +678,7 @@ std::string get403Page()
 
 std::string get404Page()
 {
-    return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>404 - Page Not Found</title>\n<style>\n*{\nmargin:0;\npadding:0;\nbox-sizing:border-box;\n}\nbody{\nbackground:#121212;\ncolor:#e0e0e0;\nfont-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;\nmin-height:100vh;\ndisplay:flex;\njustify-content:center;\nalign-items:center;\noverflow:hidden;\nposition:relative;\n}\n.container{\ntext-align:center;\nz-index:2;\nposition:relative;\npadding:2rem;\nbackground:rgba(18,18,18,0.8);\nborder-radius:15px;\nbackdrop-filter:blur(10px);\nborder:1px solid rgba(255,255,255,0.1);\n}\n.error-code{\nfont-size:8rem;\nfont-weight:900;\nbackground:linear-gradient(45deg,#ff6b6b,#4ecdc4);\n-webkit-background-clip:text;\n-webkit-text-fill-color:transparent;\ntext-shadow:0 0 30px rgba(255,107,107,0.3);\nmargin-bottom:1rem;\n}\n.error-message{\nfont-size:1.5rem;\nmargin-bottom:2rem;\ncolor:#b0b0b0;\n}\n.philosophical-quote{\nborder-left:3px solid #4ecdc4;\npadding-left:1.5rem;\nmargin:1.5rem 0;\n}\n.quote{\nfont-style:italic;\ncolor:#e0e0e0;\nfont-size:1.1rem;\nmargin:0;\nline-height:1.6;\n}\n.author{\ncolor:#b0b0b0;\nfont-size:0.9rem;\nmargin-top:0.5rem;\ntext-align:right;\n}\n.home-btn{\ndisplay:inline-block;\npadding:12px 30px;\nbackground:linear-gradient(45deg,#667eea,#764ba2);\ncolor:white;\ntext-decoration:none;\nborder-radius:25px;\nfont-weight:600;\ntransition:all 0.3s ease;\nborder:none;\ncursor:pointer;\n}\n.home-btn:hover{\ntransform:translateY(-2px);\nbox-shadow:0 10px 25px rgba(102,126,234,0.3);\n}\n.floating{\nposition:absolute;\nborder-radius:50%;\nbackground:linear-gradient(45deg,#ff6b6b,#4ecdc4,#667eea);\nopacity:0.1;\nanimation:float 6s ease-in-out infinite;\n}\n.floating:nth-child(1){\nwidth:80px;\nheight:80px;\ntop:20%;\nleft:10%;\nanimation-delay:0s;\n}\n.floating:nth-child(2){\nwidth:120px;\nheight:120px;\ntop:60%;\nright:15%;\nanimation-delay:2s;\n}\n.floating:nth-child(3){\nwidth:60px;\nheight:60px;\nbottom:20%;\nleft:20%;\nanimation-delay:4s;\n}\n@keyframes float{\n0%,100%{\ntransform:translateY(0px) rotate(0deg);\n}\n50%{\ntransform:translateY(-20px) rotate(180deg);\n}\n}\n@media (max-width:768px){\n.error-code{\nfont-size:6rem;\n}\n.error-message{\nfont-size:1.2rem;\n}\n.container{\nmargin:1rem;\npadding:1.5rem;\n}\n}\n</style>\n</head>\n<body>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"container\">\n<div class=\"error-code\">404</div>\n<div class=\"error-message\">\n<div class=\"philosophical-quote\">\n<p class=\"quote\">\"When you stare into the abyss, the abyss stares back at you.\"</p>\n<p class=\"author\">- Friedrich Nietzsche</p>\n</div>\n</div>\n<button class=\"home-btn\" onclick=\"redirectToHome()\">Return to Safety</button>\n</div>\n<script>\nfunction redirectToHome(){\nwindow.location.href=\"/\";\n}\ndocument.addEventListener('mousemove',(e)=>\n{const floating=document.querySelectorAll('.floating');\nfloating.forEach(element=>{\nconst speed=parseInt(element.style.width)/100;\nconst x=(window.innerWidth-e.pageX*speed)/100;\nconst y=(window.innerHeight-e.pageY*speed)/100;\nelement.style.transform=`translateX(${x}px) translateY(${y}px)`;\n});\n});\ndocument.addEventListener('keydown',(e)=>\n{if(e.key==='Enter')redirectToHome();\n});\n</script>\n</body>\n</html>";
+    return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>404 - Page Not Found</title>\n<style>\n*{\nmargin:0;\npadding:0;\nbox-sizing:border-box;\n}\nbody{\nbackground:#121212;\ncolor:#e0e0e0;\nfont-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;\nmin-height:100vh;\ndisplay:flex;\njustify-content:center;\nalign-items:center;\noverflow:hidden;\nposition:relative;\n}\n.container{\ntext-align:center;\nz-index:2;\nposition:relative;\npadding:2rem;\nbackground:rgba(18,18,18,0.8);\nborder-radius:15px;\nbackdrop-filter:blur(10px);\nborder:1px solid rgba(255,255,255,0.1);\n}\n.error-code{\nfont-size:8rem;\nfont-weight:900;\nbackground:linear-gradient(45deg,#ff6b6b,#4ecdc4);\n-webkit-background-clip:text;\n-webkit-text-fill-color:transparent;\ntext-shadow:0 0 30px rgba(255,107,107,0.3);\nmargin-bottom:1rem;\n}\n.error-message{\nfont-size:1.5rem;\nmargin-bottom:2rem;\ncolor:#b0b0b0;\n}\n.philosophical-quote{\nborder-left:3px solid #4ecdc4;\npadding-left:1.5rem;\nmargin:1.5rem 0;\n}\n.quote{\nfont-style:italic;\ncolor:#e0e0e0;\nfont-size:1.1rem;\nmargin:0;\nline-height:1.6;\n}\n.author{\ncolor:#b0b0b0;\nfont-size:0.9rem;\nmargin-top:0.5rem;\ntext-align:right;\n}\n.home-btn{\ndisplay:inline-block;\npadding:12px 30px;\nbackground:linear-gradient(45deg,#667eea,#764ba2);\ncolor:white;\ntext-decoration:none;\nborder-radius:25px;\nfont-weight:600;\ntransition:all 0.3s ease;\nborder:none;\ncursor:pointer;\n}\n.home-btn:hover{\ntransform:translateY(-2px);\nbox-shadow:0 10px 25px rgba(102,126,234,0.3);\n}\n.floating{\nposition:absolute;\nborder-radius:50%;\nbackground:linear-gradient(45deg,#ff6b6b,#4ecdc4,#667eea);\nopacity:0.1;\nanimation:float 6s ease-in-out infinite;\n}\n.floating:nth-child(1){\nwidth:80px;\nheight:80px;\ntop:20%;\nleft:10%;\nanimation-delay:0s;\n}\n.floating:nth-child(2){\nwidth:120px;\nheight:120px;\ntop:60%;\nright:15%;\nanimation-delay:2s;\n}\n.floating:nth-child(3){\nwidth:60px;\nheight:60px;\nbottom:20%;\nleft:20%;\nanimation-delay:4s;\n}\n@keyframes float{\n0%,100%{\ntransform:translateY(0px) rotate(0deg);\n}\n50%{\ntransform:translateY(-20px) rotate(180deg);\n}\n}\n@media (max-width:768px){\n.error-code{\nfont-size:6rem;\n}\n.error-message{\nfont-size:1.2rem;\n}\n.container{\nmargin:1rem;\npadding:1.5rem;\n}\n}\n</style>\n</head>\n<body>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"container\">\n<div class=\"error-code\">404</div>\n<div class=\"error-message\">\n<div class=\"philosophical-quote\">\n<p class=\"quote\">\"if you gaze long into an abyss, the abyss also gazes into you.\"</p>\n<p class=\"author\">- Friedrich Nietzsche</p>\n</div>\n</div>\n<button class=\"home-btn\" onclick=\"redirectToHome()\">Return to Safety</button>\n</div>\n<script>\nfunction redirectToHome(){\nwindow.location.href=\"/\";\n}\ndocument.addEventListener('mousemove',(e)=>\n{const floating=document.querySelectorAll('.floating');\nfloating.forEach(element=>{\nconst speed=parseInt(element.style.width)/100;\nconst x=(window.innerWidth-e.pageX*speed)/100;\nconst y=(window.innerHeight-e.pageY*speed)/100;\nelement.style.transform=`translateX(${x}px) translateY(${y}px)`;\n});\n});\ndocument.addEventListener('keydown',(e)=>\n{if(e.key==='Enter')redirectToHome();\n});\n</script>\n</body>\n</html>";
 }
 
 std::string get405Page()
@@ -694,6 +699,11 @@ std::string get413Page()
 std::string get500Page()
 {
     return "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>500 - Internal Server Error</title><style>*{margin:0;padding:0;box-sizing:border-box;}body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;overflow:hidden;position:relative;}.container{text-align:center;z-index:2;position:relative;padding:2rem;background:rgba(18,18,18,0.8);border-radius:15px;backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);}.error-code{font-size:8rem;font-weight:900;background:linear-gradient(45deg,#2c5da3,#1a781e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 30px rgba(239,83,80,0.3);margin-bottom:1rem;}.error-message{font-size:1.5rem;margin-bottom:2rem;color:#b0b0b0;}.philosophical-quote{border-left:3px solid #1a781e;padding-left:1.5rem;margin:1.5rem 0;}.quote{font-style:italic;color:#e0e0e0;font-size:1.1rem;margin:0;line-height:1.6;}.author{color:#b0b0b0;font-size:0.9rem;margin-top:0.5rem;text-align:right;}.home-btn{display:inline-block;padding:12px 30px;background:linear-gradient(45deg,#667eea,#764ba2);color:white;text-decoration:none;border-radius:25px;font-weight:600;transition:all 0.3s ease;border:none;cursor:pointer;}.home-btn:hover{transform:translateY(-2px);box-shadow:0 10px 25px rgba(102,126,234,0.3);}.floating{position:absolute;border-radius:50%;background:linear-gradient(45deg,#ef5350,#ec407a,#667eea);opacity:0.1;animation:float 6s ease-in-out infinite;}.floating:nth-child(1){width:110px;height:110px;top:10%;left:10%;animation-delay:0s;}.floating:nth-child(2){width:160px;height:160px;top:60%;right:15%;animation-delay:2s;}.floating:nth-child(3){width:60px;height:60px;bottom:10%;left:20%;animation-delay:4s;}@keyframes float{0%,100%{transform:translateY(0px) rotate(0deg);}50%{transform:translateY(-20px) rotate(180deg);}}@media (max-width:768px){.error-code{font-size:6rem;}.error-message{font-size:1.2rem;}.container{margin:1rem;padding:1.5rem;}}</style></head><body><div class=\"floating\"></div><div class=\"floating\"></div><div class=\"floating\"></div><div class=\"container\"><div class=\"error-code\">500</div><div class=\"error-message\"><div class=\"philosophical-quote\"><p class=\"quote\">\"The hardest battles are the ones we fight within ourselves with ourselves.\"</p><p class=\"author\">- Dr. Shefali Tsabary</p></div></div><button class=\"home-btn\" onclick=\"redirectToHome()\">Return to Safety</button></div><script>function redirectToHome(){window.location.href=\"/\";}document.addEventListener('mousemove',(e)=>{const floating=document.querySelectorAll('.floating');floating.forEach(element=>{const speed=parseInt(element.style.width)/100;const x=(window.innerWidth-e.pageX*speed)/100;const y=(window.innerHeight-e.pageY*speed)/100;element.style.transform=`translateX(${x}px) translateY(${y}px)`;});});document.addEventListener('keydown',(e)=>{if(e.key==='Enter')redirectToHome();});</script></body></html>";
+}
+
+std::string get504Page()
+{
+    return "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>504 - Gateway Timeout</title>\n<style>\n*{\nmargin:0;\npadding:0;\nbox-sizing:border-box;\n}\nbody{\nbackground:#121212;\ncolor:#e0e0e0;\nfont-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;\nmin-height:100vh;\ndisplay:flex;\njustify-content:center;\nalign-items:center;\noverflow:hidden;\nposition:relative;\n}\n.container{\ntext-align:center;\nz-index:2;\nposition:relative;\npadding:2rem;\nbackground:rgba(18,18,18,0.8);\nborder-radius:15px;\nbackdrop-filter:blur(10px);\nborder:1px solid rgba(255,255,255,0.1);\n}\n.error-code{\nfont-size:8rem;\nfont-weight:900;\nbackground:linear-gradient(45deg,#ff6b6b,#ee5a6f);\n-webkit-background-clip:text;\n-webkit-text-fill-color:transparent;\ntext-shadow:0 0 30px rgba(255,107,107,0.3);\nmargin-bottom:1rem;\n}\n.error-message{\nfont-size:1.5rem;\nmargin-bottom:2rem;\ncolor:#b0b0b0;\n}\n.philosophical-quote{\nborder-left:3px solid #ff6b6b;\npadding-left:1.5rem;\nmargin:1.5rem 0;\n}\n.quote{\nfont-style:italic;\ncolor:#e0e0e0;\nfont-size:1.1rem;\nmargin:0;\nline-height:1.6;\n}\n.author{\ncolor:#b0b0b0;\nfont-size:0.9rem;\nmargin-top:0.5rem;\ntext-align:right;\n}\n.home-btn{\ndisplay:inline-block;\npadding:12px 30px;\nbackground:linear-gradient(45deg,#667eea,#764ba2);\ncolor:white;\ntext-decoration:none;\nborder-radius:25px;\nfont-weight:600;\ntransition:all 0.3s ease;\nborder:none;\ncursor:pointer;\n}\n.home-btn:hover{\ntransform:translateY(-2px);\nbox-shadow:0 10px 25px rgba(102,126,234,0.3);\n}\n.floating{\nposition:absolute;\nborder-radius:50%;\nbackground:linear-gradient(45deg,#ff6b6b,#ee5a6f,#ffa502);\nopacity:0.1;\nanimation:float 6s ease-in-out infinite;\n}\n.floating:nth-child(1){\nwidth:110px;\nheight:110px;\ntop:10%;\nleft:10%;\nanimation-delay:0s;\n}\n.floating:nth-child(2){\nwidth:160px;\nheight:160px;\ntop:60%;\nright:15%;\nanimation-delay:2s;\n}\n.floating:nth-child(3){\nwidth:60px;\nheight:60px;\nbottom:10%;\nleft:20%;\nanimation-delay:4s;\n}\n@keyframes float{\n0%,100%{\ntransform:translateY(0px) rotate(0deg);\n}\n50%{\ntransform:translateY(-20px) rotate(180deg);\n}\n}\n@media (max-width:768px){\n.error-code{\nfont-size:6rem;\n}\n.error-message{\nfont-size:1.2rem;\n}\n.container{\nmargin:1rem;\npadding:1.5rem;\n}\n}\n</style>\n</head>\n<body>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"floating\"></div>\n<div class=\"container\">\n<div class=\"error-code\">504</div>\n<div class=\"philosophical-quote\">\n<p class=\"quote\">\"Sometimes the messenger fails, not the message.\"</p>\n<p class=\"author\">- Unknown</p>\n</div>\n<button class=\"home-btn\" onclick=\"redirectToHome()\">Return to Safety</button>\n</div>\n<script>\nfunction redirectToHome(){\nwindow.location.href=\"/\";\n}\ndocument.addEventListener('mousemove',(e)=>\n{const floating=document.querySelectorAll('.floating');\nfloating.forEach(element=>{\nconst speed=parseInt(element.style.width)/100;\nconst x=(window.innerWidth-e.pageX*speed)/100;\nconst y=(window.innerHeight-e.pageY*speed)/100;\nelement.style.transform=`translateX(${x}px) translateY(${y}px)`;\n});\n});\ndocument.addEventListener('keydown',(e)=>\n{if(e.key==='Enter')redirectToHome();\n});\n</script>\n</body>\n</html>";
 }
 
 std::string    createResponse( int code, clientData *data )
@@ -764,6 +774,13 @@ std::string    createResponse( int code, clientData *data )
         ss >> str;
         bodyResponse += "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/html\r\nContent-length: " + str + "\r\nConnection: close\r\n\r\n";
         bodyResponse += get500Page();
+    }
+    else if (code == 504)
+    {
+        ss << get504Page().length();
+        ss >> str;
+        bodyResponse += "HTTP/1.0 504 Gateway Timeout\r\nContent-Type: text/html\r\nContent-length: " + str + "\r\nConnection: close\r\n\r\n";
+        bodyResponse += get504Page();
     }
     data->state = SENDING_RESPONSE;
     return (bodyResponse);
@@ -1214,9 +1231,18 @@ void printInstructions()
 
 void cleanupClient(int epoll_fd, clientData *cData, std::map<int, clientData*> &clientDataMap)
 {
-    if (!cData) return;
+    if (!cData)
+        return;
 
     printf("Cleaning up client FD %d\n", cData->fd);
+
+    if (cData->cgiInputFd > 0) 
+    {
+        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiInputFd, NULL);
+        clientDataMap.erase(cData->cgiInputFd);
+        close(cData->cgiInputFd);
+        cData->cgiInputFd = -1;
+    }
 
     if (cData->cgiFd > 0) 
     {
@@ -1691,20 +1717,32 @@ std::string startCgiRequest(httpClientRequest *req, Server server,
         int epoll_fd)
 {
     int     pid;
-    int     pipeFd[2];
+    int     outputPipe[2];
+    int     inputPipe[2];
     CgiEnv  Env;
 
-    if (pipe(pipeFd) == -1)
+    if (pipe(outputPipe) == -1)
         return (sendErrorCode(500, server, data));
+    if (pipe(inputPipe) == -1)
+    {
+        close(outputPipe[0]);
+        close(outputPipe[1]);
+        return (sendErrorCode(500, server, data));
+    }
     pid = fork();
     if (pid < 0)
-        return (close(pipeFd[0]), close(pipeFd[1]), sendErrorCode(500, server, data));
+        return (close(outputPipe[0]), close(outputPipe[1]), close(inputPipe[0]), close(inputPipe[1]), sendErrorCode(500, server, data));
     if (pid == 0)
     {
-        close(pipeFd[0]);
-        if (dup2(pipeFd[1], STDOUT_FILENO) < 0)
-            return (close(pipeFd[1]), "-1");
-        close(pipeFd[1]);
+        close(inputPipe[1]);
+        if (dup2(inputPipe[0], STDIN_FILENO) < 0)
+            return (close(inputPipe[0]), close(outputPipe[0]), close(outputPipe[1]), "-1");
+        close(inputPipe[0]);
+
+        close(outputPipe[0]);
+        if (dup2(outputPipe[1], STDOUT_FILENO) < 0)
+            return (close(outputPipe[1]), "-1");
+        close(outputPipe[1]);
 
         Env.setEnv("REQUEST_METHOD", req->_method);
         Env.setEnv("CONTENT_TYPE", req->_contentType.empty() ? "" : req->_contentType);
@@ -1761,13 +1799,41 @@ std::string startCgiRequest(httpClientRequest *req, Server server,
     }
     else
     {
-        close(pipeFd[1]);
-        data->cgiFd = pipeFd[0];
+        close(outputPipe[1]);
+        close(inputPipe[0]);
+
+        data->cgiFd = outputPipe[0];
+        data->cgiInputFd = inputPipe[1];
         data->cgiPid = pid;
+        data->cgiStartTime = static_cast<long>(std::time(nullptr));
         data->state = WAITING_CGI_OUTPUT;
 
-        clientDataMap[data->cgiFd] = data;
+        if (req->_method == "POST" && !req->_body.empty())
+        {
+            const char* body_data = req->_body.c_str();
+            size_t total_written = 0;
+            size_t body_size = req->_body.length();
+            
+            while (total_written < body_size)
+            {
+                ssize_t written = write(data->cgiInputFd, 
+                                       body_data + total_written, 
+                                       body_size - total_written);
+                
+                if (written < 0)
+                {
+                    perror("write to CGI stdin");
+                    break;
+                }
+                total_written += written;
+            }
+        }
+        
+        close(data->cgiInputFd);
+        data->cgiInputFd = -1;
+        data->cgiInputDone = true;
 
+        clientDataMap[data->cgiFd] = data;
         struct epoll_event cgi_event;
         cgi_event.events = EPOLLIN;
         cgi_event.data.fd = data->cgiFd;
@@ -2002,7 +2068,8 @@ std::string getHandle(httpClientRequest *req, Server server,
     return (serveFile(file_path, req, data, server, *loc));
 }
 
-std::string postHandle(httpClientRequest *req, Server server, clientData *data)
+std::string postHandle(httpClientRequest *req, Server server, std::map<int, clientData*>& clientDataMap,
+        clientData *data, int epoll_fd)
 {
     Location* loc = findLocation(server, req->_path);
     
@@ -2010,7 +2077,15 @@ std::string postHandle(httpClientRequest *req, Server server, clientData *data)
         return (sendErrorCode(404, server, data));
     if (loc->getValue("allowed_methods").find("POST") == std::string::npos)
         return (sendErrorCode(405, server, data));
-    std::cout << loc->is_upload << std::endl;
+    if (isValidCgiRequest(req, server) && loc->is_cgi)
+    {
+        std::string tmp = req->_path;
+        tmp = tmp.substr(0, tmp.find_last_of("/"));
+        Location* cgiLoc = findLocation(server, tmp);
+        
+        if (cgiLoc && cgiLoc->is_cgi)
+            return (startCgiRequest(req, server, data, cgiLoc, clientDataMap, epoll_fd));
+    }
     if (loc->is_upload)
     {
         std::string filename = generateFilename(req);
@@ -2204,9 +2279,9 @@ void setup_signals()
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    
+
     sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);    
+    sigaction(SIGTERM, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
 }
 
@@ -2248,7 +2323,7 @@ void    finalizeReq(Server server, clientData *cData, int cliefd,
         if (req->_method == "GET")
             cData->response_data = getHandle(req, server, clientDataMap, cData, epoll_fd);
         else if (req->_method == "POST")
-            cData->response_data = postHandle(req, server, cData);
+            cData->response_data = postHandle(req, server, clientDataMap, cData, epoll_fd);
         else if (req->_method == "DELETE")
             cData->response_data = deleteHandle(req, server, cData);
         else
@@ -2454,9 +2529,74 @@ int main(int ac, char **av)
                     continue;
                 }
 
+                if (cData->cgiInputFd > 0 && cData->cgiInputFd == cliefd 
+                    && events[i].events & EPOLLOUT)
+                {
+                    if (!cData->cgiInputDone && !cData->cgiInputData.empty())
+                    {
+                        ssize_t written = write(cData->cgiInputFd, 
+                                            cData->cgiInputData.c_str(), 
+                                            cData->cgiInputData.length());
+                        
+                        if (written > 0)
+                        {
+                            cData->cgiInputData.erase(0, written);
+                            
+                            if (cData->cgiInputData.empty())
+                            {
+                                epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiInputFd, NULL);
+                                clientDataMap.erase(cData->cgiInputFd);
+                                close(cData->cgiInputFd);
+                                cData->cgiInputFd = -1;
+                                cData->cgiInputDone = true;
+                            }
+                        }
+                        else if (written < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+                        {
+                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiInputFd, NULL);
+                            clientDataMap.erase(cData->cgiInputFd);
+                            close(cData->cgiInputFd);
+                            cData->cgiInputFd = -1;
+                            cData->cgiInputDone = true;
+                        }
+                    }
+                    continue;
+                }
+
                 if (cData->cgiFd > 0 && cData->cgiFd == cliefd 
                     && events[i].events & (EPOLLIN | EPOLLHUP))
                 {
+                    long current_time = static_cast<long>(std::time(nullptr));
+                    long elapsed = current_time - cData->cgiStartTime;
+                    
+                    if (elapsed >= static_cast<long>(servers[cData->serverIndex]._cgiTimeout.num))
+                    {
+                        std::cout << "CGI timeout: " << elapsed << "s (limit: " 
+                                << servers[cData->serverIndex]._cgiTimeout.num << "s)" << std::endl;
+                        
+                        cData->response_data = sendErrorCode(504, servers[cData->serverIndex], cData);
+                        cData->state = SENDING_RESPONSE;
+
+                        if (cData->cgiPid > 0)
+                        {
+                            kill(cData->cgiPid, SIGKILL);
+                            waitpid(cData->cgiPid, NULL, 0);
+                            cData->cgiPid = -1;
+                        }
+                        
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
+                        clientDataMap.erase(cData->cgiFd);
+                        close(cData->cgiFd);
+                        cData->cgiFd = -1;
+                        
+                        struct epoll_event client_event;
+                        client_event.events = EPOLLOUT;
+                        client_event.data.fd = cData->fd;
+                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                        
+                        continue;
+                    }
+
                     char buffer[4096];
                     ssize_t bytes = read(cliefd, buffer, sizeof(buffer));
                                         
@@ -2465,8 +2605,14 @@ int main(int ac, char **av)
                     
                     if (bytes == 0)  
                     {
-                        printf("DEBUG: CGI pipe EOF - processing completion\n");
-                        
+                        if (cData->cgiInputFd > 0)
+                        {
+                            epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiInputFd, NULL);
+                            clientDataMap.erase(cData->cgiInputFd);
+                            close(cData->cgiInputFd);
+                            cData->cgiInputFd = -1;
+                        }
+
                         int status;
                         pid_t result = waitpid(cData->cgiPid, &status, WNOHANG);
                         
@@ -2497,12 +2643,15 @@ int main(int ac, char **av)
                                 epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
                             }
                         }
-                        else if (result == 0) 
+                        else
                         {
-                            usleep(10000);
-                            result = waitpid(cData->cgiPid, &status, WNOHANG);
+                            if (result == 0)
+                            {
+                                usleep(100000);
+                                result = waitpid(cData->cgiPid, &status, WNOHANG);
+                            }
                             
-                            if (result == cData->cgiPid && WIFEXITED(status) && WEXITSTATUS(status) == 0) 
+                            if (result == cData->cgiPid && WIFEXITED(status) && WEXITSTATUS(status) == 0)
                             {
                                 cData->response_data = "HTTP/1.1 200 OK\r\n";
                                 cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
@@ -2510,56 +2659,27 @@ int main(int ac, char **av)
                                 cData->response_data += "Connection: close\r\n\r\n";
                                 cData->response_data += cData->CgiBody;
                                 cData->state = SENDING_RESPONSE;
-                                
-                                struct epoll_event client_event;
-                                client_event.events = EPOLLOUT;
-                                client_event.data.fd = cData->fd;
-                                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
                             }
-                            else 
+                            else
                             {
-                                printf("DEBUG: CGI still not exited, killing and sending 500\n");
                                 kill(cData->cgiPid, SIGKILL);
                                 waitpid(cData->cgiPid, &status, 0);
                                 cData->response_data = sendErrorCode(500, servers[cData->serverIndex], cData);
                                 cData->state = SENDING_RESPONSE;
-                                
-                                struct epoll_event client_event;
-                                client_event.events = EPOLLOUT;
-                                client_event.data.fd = cData->fd;
-                                epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
                             }
                         }
-                        else 
-                        {
-                            // waitpid error
-                            printf("DEBUG: waitpid error: %s\n", strerror(errno));
-                            cData->response_data = sendErrorCode(500, servers[cData->serverIndex], cData);
-                            cData->state = SENDING_RESPONSE;
-                            
-                            struct epoll_event client_event;
-                            client_event.events = EPOLLOUT;
-                            client_event.data.fd = cData->fd;
-                            epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
-                        }
                         
-                        // Cleanup regardless
+                        struct epoll_event client_event;
+                        client_event.events = EPOLLOUT;
+                        client_event.data.fd = cData->fd;
+                        epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                        
                         epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
                         clientDataMap.erase(cData->cgiFd);
                         close(cData->cgiFd);
                         cData->cgiFd = -1;
                         cData->cgiPid = -1;
                     }
-                    else if (bytes < 0) 
-                    {
-                        printf("DEBUG: CGI read error\n");
-                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
-                        clientDataMap.erase(cData->cgiFd);
-                        close(cData->cgiFd);
-                        cData->cgiFd = -1;
-                    }
-                    // If bytes > 0 OR bytes == -1 (EAGAIN) with EPOLLHUP, just continue
-                    // Don't trigger response yet - wait for actual EOF (bytes == 0)
                     continue;
                 }
 
