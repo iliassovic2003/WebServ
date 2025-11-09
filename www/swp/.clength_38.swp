@@ -1,0 +1,17 @@
+POST /ai-chat/aiChat.py HTTP/1.1
+Host: 127.0.0.1:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0
+Accept: */*
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Referer: http://127.0.0.1:8080/ai-chat
+Content-Type: application/json
+Content-Length: 94
+Origin: http://127.0.0.1:8080
+Connection: keep-alive
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-origin
+Priority: u=0
+
+{"message":"hi can you convert 3 feet to meter please","timestamp":"2025-11-09T17:43:34.433Z"}

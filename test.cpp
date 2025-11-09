@@ -144,6 +144,7 @@ class clientData
         bool        cgiInputDone;
         std::string cgiInputData;
         long        cgiStartTime;
+        bool        cgiTypeRequest;
         uint64_t    totalSize;
         bool        headers_complete;
         bool        body_complete;
@@ -156,7 +157,7 @@ class clientData
                       bytes_sent(0), headers_complete(false), body_complete(false),
                       ccFlag(1), totalbytes(0), serverIndex(0), serverPort(0),
                       requestStartTime(0), cgiFd(-1), CgiBody(""), cgiInputFd(-1),
-                      cgiInputDone(false), cgiStartTime(0) {}
+                      cgiInputDone(false), cgiStartTime(0), cgiTypeRequest(0) {}
         ~clientData() {};
 };
 
@@ -980,7 +981,6 @@ Location* findLocation(Server& server, const std::string& path)
 
 bool isValidCgiRequest(httpClientRequest* req, Server server)
 {
-    
     std::string path = req->_path;
 
     int pos = path.find_last_of(".");
@@ -1828,7 +1828,7 @@ std::string startCgiRequest(httpClientRequest *req, Server server,
                 total_written += written;
             }
         }
-        
+
         close(data->cgiInputFd);
         data->cgiInputFd = -1;
         data->cgiInputDone = true;
@@ -1847,12 +1847,13 @@ std::string getHandle(httpClientRequest *req, Server server,
         std::map<int, clientData*>& clientDataMap, clientData *data, int epoll_fd)
 {
     if ((long)std::time(NULL) - (long)data->requestStartTime >= (long)server._reqTimeout.num)
-       return (sendErrorCode(408, server, data));
+        return (std::remove(data->filename.c_str()), sendErrorCode(408, server, data));
 
     std::string response;
-    int     flag = 0;
-    bool    isFile = 1;
-    bool    isForb = 1;
+    int         flag = 0;
+    bool        isFile = 1;
+    bool        isForb = 1;
+
     
     if (req->_path == "/favicon.ico" && !flag)
     {
@@ -2071,21 +2072,25 @@ std::string getHandle(httpClientRequest *req, Server server,
 std::string postHandle(httpClientRequest *req, Server server, std::map<int, clientData*>& clientDataMap,
         clientData *data, int epoll_fd)
 {
+    if (isValidCgiRequest(req, server))
+    {
+        std::string tmp = req->_path;
+        tmp = tmp.substr(0, tmp.find_last_of("/"));
+        Location* cgiLoc = findLocation(server, tmp);
+
+        if (cgiLoc && cgiLoc->is_cgi)
+        {
+            data->cgiTypeRequest = 1;
+            return (startCgiRequest(req, server, data, cgiLoc, clientDataMap, epoll_fd));
+        }
+    }
+
     Location* loc = findLocation(server, req->_path);
     
     if (!loc)
         return (sendErrorCode(404, server, data));
     if (loc->getValue("allowed_methods").find("POST") == std::string::npos)
         return (sendErrorCode(405, server, data));
-    if (isValidCgiRequest(req, server) && loc->is_cgi)
-    {
-        std::string tmp = req->_path;
-        tmp = tmp.substr(0, tmp.find_last_of("/"));
-        Location* cgiLoc = findLocation(server, tmp);
-        
-        if (cgiLoc && cgiLoc->is_cgi)
-            return (startCgiRequest(req, server, data, cgiLoc, clientDataMap, epoll_fd));
-    }
     if (loc->is_upload)
     {
         std::string filename = generateFilename(req);
@@ -2207,7 +2212,7 @@ unsigned long convertIPtoLong(const std::string& ip_str)
     
     for (size_t i = 0; i <= ip_str.length(); i++)
     {
-        char c = (i < ip_str.length()) ? ip_str[i] : '.'; // Treat end as final dot
+        char c = (i < ip_str.length()) ? ip_str[i] : '.';
         
         if (c >= '0' && c <= '9')
         {
@@ -2269,7 +2274,7 @@ std::string convertLongToIP(unsigned long ip_long)
 
 void signal_handler(int sig)
 {
-    if (sig == SIGINT || sig == SIGTERM) // sigterm can be deleated
+    if (sig == SIGINT || sig == SIGTERM)
         std::cout << "\nCleaning and exiting..." << std::endl;
 }
 
@@ -2290,6 +2295,7 @@ void    finalizeReq(Server server, clientData *cData, int cliefd,
 {
     if ((long)std::time(NULL) - (long)cData->requestStartTime >= (long)server._reqTimeout.num)
     {
+        std::remove(cData->filename.c_str());
         cData->response_data = sendErrorCode(408, server, cData);
         cData->state = SENDING_RESPONSE;
         
@@ -2314,7 +2320,7 @@ void    finalizeReq(Server server, clientData *cData, int cliefd,
             buffer << requestFile.rdbuf();
             cData->request_data = buffer.str();
             requestFile.close();
-            std::remove(fileName.c_str());
+            // std::remove(fileName.c_str());
         }
 
         httpClientRequest* req = new httpClientRequest();
@@ -2616,14 +2622,18 @@ int main(int ac, char **av)
                         int status;
                         pid_t result = waitpid(cData->cgiPid, &status, WNOHANG);
                         
+                        
                         if (result == cData->cgiPid) 
                         {
                             if (WIFEXITED(status) && WEXITSTATUS(status) == 0) 
                             {
-                                cData->response_data = "HTTP/1.1 200 OK\r\n";
-                                cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
-                                cData->response_data += "Content-Length: " + std::to_string(cData->CgiBody.length()) + "\r\n";
-                                cData->response_data += "Connection: close\r\n\r\n";
+                                if (!cData->cgiTypeRequest)
+                                {
+                                    cData->response_data = "HTTP/1.1 200 OK\r\n";
+                                    cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
+                                    cData->response_data += "Content-Length: " + std::to_string(cData->CgiBody.length()) + "\r\n";
+                                    cData->response_data += "Connection: close\r\n\r\n";
+                                }
                                 cData->response_data += cData->CgiBody;
                                 cData->state = SENDING_RESPONSE;
                                 
@@ -2731,7 +2741,7 @@ int main(int ac, char **av)
                                     {
                                         perror("file open()");
                                         cleanupClient(epoll_fd, cData, clientDataMap);
-                                        std::remove(fileStr.c_str());
+                                        // std::remove(fileStr.c_str());
                                         continue;
                                     }
                                     ssize_t bytes_written = write(cfd, cData->headerStr.c_str(), cData->headerStr.size());
@@ -2781,7 +2791,6 @@ int main(int ac, char **av)
                                     cData->body_complete = true;
                             }
                         }
-                        
                         if (cData->body_complete && cData->ccFlag == 0)
                             finalizeReq(servers[cData->serverIndex], cData, cliefd, epoll_fd, clientDataMap);
                     }
