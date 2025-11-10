@@ -1,8 +1,5 @@
 #!/usr/bin/php-cgi
 
-<?php
-echo "this is a cgi-test for the php.\n made with pure love and hate.\n help me, i got kidnapped.\n";
-?>
 <!DOCTYPE html>
 <html>
 <head>

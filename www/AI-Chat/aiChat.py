@@ -7,13 +7,31 @@ import urllib.request
 import urllib.parse
 import time
 
-# Gemini API Configuration - USING EXACT MODEL NAMES FROM LIST
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
-API_KEY = "REMEMBER KIDS, DONT PUSH YOUR API KEY"
+MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash-exp",
+    "gemini-2.0-pro",
+    "gemini-2.0-pro-exp", 
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-001",
+    "gemini-1.5-pro-exp",
+    "gemini-1.0-pro",
+    "gemini-1.0-pro-001",
+    "gemini-1.0-pro-002",
+    "gemini-pro",
+    "gemini-pro-vision"
+]
 
-def get_gemini_response(user_message):
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
+API_KEY = "thaa key"
+
+def get_gemini_response(user_message, model):
+    """Get response from specific Gemini model"""
     try:
-        url = f"{GEMINI_API_URL}?key={API_KEY}"
+        url = f"{GEMINI_API_BASE}/{model}:generateContent?key={API_KEY}"
         
         data = {
             "contents": [
@@ -40,16 +58,17 @@ def get_gemini_response(user_message):
             method='POST'
         )
         
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=30) as response:
             result = json.loads(response.read().decode('utf-8'))
             
-            # Extract the response text from Gemini's response structure
             if 'candidates' in result and len(result['candidates']) > 0:
                 return result['candidates'][0]['content']['parts'][0]['text']
             else:
-                return "❌ No response generated from Gemini"
+                return None
             
     except urllib.error.HTTPError as e:
+        if e.code == 503:
+            return None
         error_data = e.read().decode()
         try:
             error_json = json.loads(error_data)
@@ -60,46 +79,55 @@ def get_gemini_response(user_message):
     except Exception as e:
         return f"❌ Connection Error: {str(e)}"
 
+def try_all_models(user_message):
+    """Try all models until one works"""
+    for model in MODELS:
+        print(f"Trying model: {model}", file=sys.stderr)
+        
+        response = get_gemini_response(user_message, model)
+        
+        if response is None:
+            time.sleep(1)
+            continue
+        elif not response.startswith("❌"):
+            return response, model
+    
+    return "❌ All Gemini models are currently overloaded. Please try again in a few moments.", "none"
+
 def main():
-    """Main CGI handler - receives POST data and responds"""
     try:
-        # Read Content-Length from environment
         content_length = int(os.environ.get('CONTENT_LENGTH', 0))
         
         if content_length == 0:
             print('{"status": "error", "error": "No POST data received"}')
             return
         
-        # Read POST body from stdin
         post_data = sys.stdin.read(content_length)
         
-        # Parse JSON
         try:
             data = json.loads(post_data)
         except json.JSONDecodeError:
             print('{"status": "error", "error": "Invalid JSON format"}')
             return
         
-        # Get user message
         user_message = data.get('message', '').strip()
         
         if not user_message:
             print('{"status": "error", "error": "Empty message"}')
             return
+
+        # Try all models with fallback
+        ai_response, used_model = try_all_models(user_message)
         
-        # Get AI response from Gemini API
-        ai_response = get_gemini_response(user_message)
-        
-        # Prepare success response
         response = {
-            "status": "success",
+            "status": "success" if not ai_response.startswith("❌") else "error",
             "response": ai_response,
+            "model_used": used_model,
+            "models_tried": MODELS,
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-            "message_length": len(user_message),
-            "model": "gemini-2.5-flash"
+            "message_length": len(user_message)
         }
         
-        # Output JSON
         print(json.dumps(response))
         
     except Exception as e:

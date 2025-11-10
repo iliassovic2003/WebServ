@@ -1,7 +1,6 @@
 #!/bin/bash
 
 cat << 'EOF'
-Content-type: text/html
 
 <!DOCTYPE html>
 <html>
@@ -100,7 +99,11 @@ cat << 'EOF'
         
         <div class="terminal">
             <p>$ echo "Hello from Bash CGI"</p>
-            <p>Hello from Bash CGI</p>
+EOF
+
+echo "Hello from Bash CGI"
+
+cat << 'EOF'
         </div>
     </div>
 </body>

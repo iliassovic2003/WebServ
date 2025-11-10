@@ -1745,7 +1745,6 @@ std::string startCgiRequest(httpClientRequest *req, Server server,
         close(outputPipe[1]);
 
         Env.setEnv("REQUEST_METHOD", req->_method);
-        Env.setEnv("CONTENT_TYPE", req->_contentType.empty() ? "" : req->_contentType);
         Env.setEnv("CONTENT_LENGTH", req->_contentLength.empty() ? "0" : req->_contentLength);
 
         // Server information
@@ -2320,7 +2319,7 @@ void    finalizeReq(Server server, clientData *cData, int cliefd,
             buffer << requestFile.rdbuf();
             cData->request_data = buffer.str();
             requestFile.close();
-            // std::remove(fileName.c_str());
+            std::remove(fileName.c_str());
         }
 
         httpClientRequest* req = new httpClientRequest();
@@ -2470,6 +2469,54 @@ int main(int ac, char **av)
 
     while (1)
     {
+        std::map<int, clientData*>::iterator timeout_it = clientDataMap.begin();
+        while (timeout_it != clientDataMap.end())
+        {
+            clientData* cData = timeout_it->second;
+
+            if (cData->state == SENDING_RESPONSE && cData->cgiFd > 0 && cData->cgiPid > 0)
+            {
+                long current_time = static_cast<long>(std::time(nullptr));
+                long elapsed = current_time - cData->cgiStartTime;
+                
+                if (elapsed >= static_cast<long>(servers[cData->serverIndex]._cgiTimeout.num))
+                {
+                    std::cout << "⏰ CGI timeout detected (periodic check): " << elapsed 
+                            << "s (limit: " << servers[cData->serverIndex]._cgiTimeout.num << "s)" 
+                            << " PID: " << cData->cgiPid << std::endl;
+                    
+                    if (cData->cgiPid > 0)
+                    {
+                        kill(cData->cgiPid, SIGKILL);
+                        waitpid(cData->cgiPid, NULL, 0);
+                        cData->cgiPid = -1;
+                    }
+                    if (cData->cgiInputFd > 0)
+                    {
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiInputFd, NULL);
+                        clientDataMap.erase(cData->cgiInputFd);
+                        close(cData->cgiInputFd);
+                        cData->cgiInputFd = -1;
+                    }
+                    if (cData->cgiFd > 0)
+                    {
+                        epoll_ctl(epoll_fd, EPOLL_CTL_DEL, cData->cgiFd, NULL);
+                        clientDataMap.erase(cData->cgiFd);
+                        close(cData->cgiFd);
+                        cData->cgiFd = -1;
+                    }
+                    
+                    cData->response_data = sendErrorCode(504, servers[cData->serverIndex], cData);
+                    cData->state = SENDING_RESPONSE;
+                    
+                    struct epoll_event client_event;
+                    client_event.events = EPOLLOUT;
+                    client_event.data.fd = cData->fd;
+                    epoll_ctl(epoll_fd, EPOLL_CTL_MOD, cData->fd, &client_event);
+                }
+            }
+            ++timeout_it;
+        }
         int readyEvents = epoll_wait(epoll_fd, events, 100, -1);
         if (readyEvents == -1)
         {
@@ -2630,7 +2677,6 @@ int main(int ac, char **av)
                                 if (!cData->cgiTypeRequest)
                                 {
                                     cData->response_data = "HTTP/1.1 200 OK\r\n";
-                                    cData->response_data += "Content-type: text/html; charset=utf-8\r\n";
                                     cData->response_data += "Content-Length: " + std::to_string(cData->CgiBody.length()) + "\r\n";
                                     cData->response_data += "Connection: close\r\n\r\n";
                                 }
@@ -2741,7 +2787,7 @@ int main(int ac, char **av)
                                     {
                                         perror("file open()");
                                         cleanupClient(epoll_fd, cData, clientDataMap);
-                                        // std::remove(fileStr.c_str());
+                                        std::remove(fileStr.c_str());
                                         continue;
                                     }
                                     ssize_t bytes_written = write(cfd, cData->headerStr.c_str(), cData->headerStr.size());
