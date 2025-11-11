@@ -26,10 +26,9 @@ MODELS = [
 ]
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
-API_KEY = "thaa key"
+API_KEY = "Nuhuh Next Time"
 
 def get_gemini_response(user_message, model):
-    """Get response from specific Gemini model"""
     try:
         url = f"{GEMINI_API_BASE}/{model}:generateContent?key={API_KEY}"
         
@@ -80,10 +79,7 @@ def get_gemini_response(user_message, model):
         return f"❌ Connection Error: {str(e)}"
 
 def try_all_models(user_message):
-    """Try all models until one works"""
     for model in MODELS:
-        print(f"Trying model: {model}", file=sys.stderr)
-        
         response = get_gemini_response(user_message, model)
         
         if response is None:
@@ -116,7 +112,6 @@ def main():
             print('{"status": "error", "error": "Empty message"}')
             return
 
-        # Try all models with fallback
         ai_response, used_model = try_all_models(user_message)
         
         response = {
