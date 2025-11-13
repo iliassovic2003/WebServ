@@ -4,16 +4,16 @@ server {
     listen 1337;
     listen 8080;
     listen 8081;
-    server_name server1;
 
+    server_name server1;
     root /www;
 
     request_timeout 5S;
     CGI_script_timeout 10S;
     client_max_body_size 100M;
 
-    error_page 404 /404.html;
     error_page 403 /403.html;
+    error_page 404 /404.html;
     error_page 500 /500.html;
     error_page 504 /504.html;
 
@@ -73,6 +73,7 @@ server {
         allowed_methods GET POST;
         cgi_enable on;
         .py /usr/bin/python3;
+        .sh /usr/bin/bash;
     }
 
     location /errors {

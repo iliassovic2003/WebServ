@@ -452,7 +452,6 @@
                         body: fileBuffer
                     });
                     const text = await response.text();
-                    console.log('Response body:', text);
 
                     if (response.ok)
                         window.location.href = '{{SUCCESS}}';

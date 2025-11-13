@@ -26,7 +26,7 @@ MODELS = [
 ]
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1/models"
-API_KEY = "Nuhuh Next Time"
+API_KEY = "Better Luck Next TIME..."
 
 def get_gemini_response(user_message, model):
     try:

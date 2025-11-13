@@ -273,7 +273,7 @@
         const expiryTimeInDays = 1;
         
         const AI_CHAT_ENDPOINT = '/ai-chat/aiChat.py';
-        const SESSION_ENDPOINT = '/ai-chat/ssMan.py';
+        const SESSION_ENDPOINT = '/ai-chat/ssMan.sh';
 
         function extractJSON(rawResponse) {
             if (rawResponse.includes('\n\n')) {
@@ -445,6 +445,8 @@
                 return;
             }
 
+            let rawResponse; // Declare here so it's available in catch block
+
             try {
                 const response = await fetch(SESSION_ENDPOINT, {
                     method: 'POST',
@@ -462,7 +464,8 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
 
-                const rawResponse = await response.text();
+                rawResponse = await response.text();
+                
                 const jsonResponse = extractJSON(rawResponse);
                 const data = JSON.parse(jsonResponse);
                 
@@ -481,10 +484,7 @@
                 }
             } catch (error) {
                 console.error('Failed to load chat history:', error);
-                console.error('Error details:', {
-                    message: error.message,
-                    stack: error.stack
-                });
+                console.error('Raw response that failed:', rawResponse);
             }
         }
 
