@@ -121,19 +121,29 @@ public:
     }
 };
 
+static std::string getEnvVar(const std::string& name)
+{
+    extern char** environ;
+    for (char** env = environ; *env != 0; env++)
+    {
+        std::string envStr(*env);
+        size_t pos = envStr.find('=');
+        if (pos != std::string::npos)
+        {
+            std::string key = envStr.substr(0, pos);
+            if (key == name)
+                return envStr.substr(pos + 1);
+        }
+    }
+    return "";
+}
+
 class FileSystem {
 public:
     static bool fileExists(const std::string& path)
     {
         struct stat buffer;
         return (stat(path.c_str(), &buffer) == 0);
-    }
-
-    static bool createDirectory(const std::string& path)
-    {
-        if (fileExists(path))
-            return true;
-        return mkdir(path.c_str(), 0755) == 0;
     }
 
     static std::string readFile(const std::string& path)
@@ -159,15 +169,14 @@ public:
 
     static std::string getExecutablePath()
     {
-        char path[1024];
-        ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
-        if (len != -1) {
-            path[len] = '\0';
-            std::string fullPath(path);
-            size_t lastSlash = fullPath.find_last_of('/');
+        std::string scriptFilename = getEnvVar("SCRIPT_FILENAME");
+        if (!scriptFilename.empty())
+        {
+            size_t lastSlash = scriptFilename.find_last_of('/');
             if (lastSlash != std::string::npos)
-                return fullPath.substr(0, lastSlash);
+                return scriptFilename.substr(0, lastSlash);
         }
+
         return ".";
     }
 };
@@ -272,11 +281,7 @@ private:
     }
 
 public:
-    SessionManager(const std::string& dir) : sessionsDir(dir)
-    {
-        if (!FileSystem::createDirectory(sessionsDir))
-            std::cerr << "Failed to create sessions directory: " << sessionsDir << std::endl;
-    }
+    SessionManager(const std::string& dir) : sessionsDir(dir) {}
 
     SessionData loadSession(const std::string& sessionId)
     {
@@ -309,7 +314,7 @@ public:
         session.updatedAt = JSON::getCurrentTimestamp();
         session.expiresAt = expiryDate;
         session.messageCount = 0;
-        
+
         saveSession(session);
         return session;
     }
@@ -329,11 +334,11 @@ public:
 
     static std::string getPostData()
     {
-        const char* contentLengthStr = getenv("CONTENT_LENGTH");
-        if (!contentLengthStr)
+        std::string contentLengthStr = getEnvVar("CONTENT_LENGTH");
+        if (contentLengthStr.empty())
             return "";
         
-        int contentLength = atoi(contentLengthStr);
+        int contentLength = atoi(contentLengthStr.c_str());
         if (contentLength <= 0)
             return "";
         
